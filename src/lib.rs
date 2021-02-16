@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::str;
 
 #[repr(u8)]
 pub enum type_flag {
@@ -72,7 +73,7 @@ impl Default for tar_node {
 pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 
 //Incomplete
-pub fn tar_open(filename: String) -> Vec<tar_node> {
+pub fn file_open(filename: String) -> Vec<tar_node> {
     let mut file = File::open(filename).expect("Could not open file");
 
     let out = ingest(file);
@@ -89,7 +90,7 @@ pub fn tar_write(filename: File, tar: &mut Vec<tar_node>) {
 
 fn ingest(mut filename: File) -> Vec<tar_node> {
     let mut tar = Vec::<tar_node>::new();
-    match parse_header(&filename) {
+    match generate_header(&filename) {
         Some(n) => {
             tar.push(tar_node {
                 header: n,
@@ -100,8 +101,9 @@ fn ingest(mut filename: File) -> Vec<tar_node> {
     };
     tar
 }
+
 //Incomplete
-fn parse_header(filename: &File) -> Option<tar_header> {
+fn generate_header(filename: &File) -> Option<tar_header> {
     let header: tar_header = tar_header::default();
     Some(header)
 }
@@ -144,11 +146,11 @@ fn convert_header_to_oct(header: tar_header) -> tar_header {
 }
 
 //Incomplete
-fn oct_to_dec(input: Vec<char>) -> usize {
-    0
+fn oct_to_dec(input: &[u8]) -> usize {
+    usize::from_str_radix(str::from_utf8(&input).unwrap(), 8).unwrap()
 }
 
 //Incomplete
-fn dec_to_oct(input: usize) -> Vec<char> {
-    Vec::<char>::new()
+fn dec_to_oct(input: usize) -> Vec<u8> {
+    Vec::<u8>::new()
 }
