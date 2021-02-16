@@ -56,65 +56,86 @@ impl Default for tar_header {
 
 pub struct tar_node {
     header: tar_header,
-    data: [u8; 512],
+    data: Vec<[u8; 512]>,
 }
 
 impl Default for tar_node {
     fn default() -> tar_node {
         tar_node {
             header: tar_header::default(),
-            data: [0; 512],
+            data: Vec::<[u8; 512]>::new(),
         }
     }
 }
 
-pub fn tar_append(filename: File, tar: Vec<tar_node>) -> Vec<tar_node> {
-    Vec::<tar_node>::new()
+//Incomplete
+pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {
+
 }
 
+//Incomplete
 pub fn tar_open(filename: File) -> Vec<tar_node> {
     Vec::<tar_node>::new()
 }
 
-pub fn tar_close(tar: Vec<tar_node>) {}
-
+//Incomplete
 pub fn tar_write(tar: &mut Vec<tar_node>) {
     append_end(tar);
 }
 
+//Incomplete
 fn ingest(filename: File) -> Vec<tar_node> {
     Vec::<tar_node>::new()
 }
-
+//Incomplete
 fn parse_header(filename: File) -> Option<tar_header> {
     let header: tar_header = tar_header::default();
     Some(header)
 }
 
-fn parse_data(filename: File) {}
+fn parse_data<T: std::io::Read>(mut file: T) -> Vec<[u8;512]> {
+    let mut out = Vec::<[u8;512]>::new();
+    loop {
+        let mut buf: [u8; 512] = [0; 512];
+        let len = file.read(&mut buf).unwrap();
+        if len == 0 {
+            break;
+        }
 
+        out.push(buf)
+    }
+    out
+}
+
+//Incomplete
 fn serialize(tar: Vec<tar_node>) -> Vec<u8> {
     Vec::<u8>::new()
 }
 
 fn append_end(tar: &mut Vec<tar_node>) {
-    tar.push(tar_node::default());
+    let mut node = tar_node::default();
+    node.data.push([0;512]);
+    tar.push(node);
 }
 
+//Incomplete
 fn convert_header_to_dec(header: tar_header) -> tar_header {
     let header: tar_header = tar_header::default();
     header
 }
 
+//Incomplete
 fn convert_header_to_oct(header: tar_header) -> tar_header {
     let header: tar_header = tar_header::default();
     header
 }
 
+//Incomplete
 fn oct_to_dec(input: Vec<char>) -> usize {
     0
 }
 
+//Incomplete
 fn dec_to_oct(input: usize) -> Vec<char> {
     Vec::<char>::new()
 }
