@@ -78,7 +78,9 @@ pub fn tar_open(filename: File) -> Vec<tar_node> {
 
 pub fn tar_close(tar: Vec<tar_node>) {}
 
-pub fn tar_write(tar: Vec<tar_node>) {}
+pub fn tar_write(tar: &mut Vec<tar_node>) {
+    append_end(tar);
+}
 
 fn ingest(filename: File) -> Vec<tar_node> {
     Vec::<tar_node>::new()
@@ -95,7 +97,7 @@ fn serialize(tar: Vec<tar_node>) -> Vec<u8> {
     Vec::<u8>::new()
 }
 
-fn append_empty(tar: &mut Vec<tar_node>) {
+fn append_end(tar: &mut Vec<tar_node>) {
     tar.push(tar_node::default());
 }
 
