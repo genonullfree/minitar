@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::str;
+use std::io::Write;
 
 #[repr(u8)]
 pub enum type_flag {
@@ -74,7 +75,7 @@ pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 
 //Incomplete
 pub fn file_open(filename: String) -> Vec<tar_node> {
-    let mut file = File::open(filename).expect("Could not open file");
+    let file = File::open(filename).expect("Could not open file");
 
     let out = ingest(file);
 
@@ -84,11 +85,11 @@ pub fn file_open(filename: String) -> Vec<tar_node> {
 //Incomplete
 pub fn tar_write(filename: File, tar: &mut Vec<tar_node>) {
     append_end(tar);
-    //serialize()
+    let flat = serialize(&tar);
     //write()
 }
 
-fn ingest(mut filename: File) -> Vec<tar_node> {
+fn ingest(filename: File) -> Vec<tar_node> {
     let mut tar = Vec::<tar_node>::new();
     match generate_header(&filename) {
         Some(n) => {
@@ -122,9 +123,30 @@ fn parse_data<T: std::io::Read>(mut file: T) -> Vec<[u8; 512]> {
     out
 }
 
-//Incomplete
-fn serialize(tar: Vec<tar_node>) -> Vec<u8> {
-    Vec::<u8>::new()
+fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
+    let mut out = Vec::<u8>::new();
+    for node in tar {
+        out.extend_from_slice(&node.header.file_name);
+        out.extend_from_slice(&node.header.file_mode);
+        out.extend_from_slice(&node.header.own_user);
+        out.extend_from_slice(&node.header.own_group);
+        out.extend_from_slice(&node.header.file_size);
+        out.extend_from_slice(&node.header.mod_time);
+        out.extend_from_slice(&node.header.header_checksum);
+        out.extend_from_slice(&node.header.link_indicator);
+        out.extend_from_slice(&node.header.link_name);
+        out.extend_from_slice(&node.header.ustar_magic);
+        out.extend_from_slice(&node.header.ustar_version);
+        out.extend_from_slice(&node.header.own_user_name);
+        out.extend_from_slice(&node.header.own_group_name);
+        out.extend_from_slice(&node.header.device_major);
+        out.extend_from_slice(&node.header.device_minor);
+        out.extend_from_slice(&node.header.file_prefix);
+        for d in &node.data {
+            out.extend_from_slice(d);
+        }
+    }
+    out
 }
 
 fn append_end(tar: &mut Vec<tar_node>) {
@@ -145,7 +167,6 @@ fn convert_header_to_oct(header: tar_header) -> tar_header {
     header
 }
 
-//Incomplete
 fn oct_to_dec(input: &[u8]) -> usize {
     usize::from_str_radix(str::from_utf8(&input).unwrap(), 8).unwrap()
 }
