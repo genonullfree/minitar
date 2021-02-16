@@ -73,7 +73,6 @@ impl Default for tar_node {
 //Incomplete
 pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 
-//Incomplete
 pub fn file_open(filename: String) -> Vec<tar_node> {
     let file = File::open(filename).expect("Could not open file");
 
@@ -82,11 +81,14 @@ pub fn file_open(filename: String) -> Vec<tar_node> {
     out
 }
 
-//Incomplete
-pub fn tar_write(filename: File, tar: &mut Vec<tar_node>) {
+pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
     append_end(tar);
     let flat = serialize(&tar);
-    //write()
+
+    let mut file = File::create(filename).expect("Error creating file");
+
+    file.write_all(&flat);
+    file.flush();
 }
 
 fn ingest(filename: File) -> Vec<tar_node> {
