@@ -69,32 +69,45 @@ impl Default for tar_node {
 }
 
 //Incomplete
-pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {
+pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 
+//Incomplete
+pub fn tar_open(filename: String) -> Vec<tar_node> {
+    let mut file = File::open(filename).expect("Could not open file");
+
+    let out = ingest(file);
+
+    out
 }
 
 //Incomplete
-pub fn tar_open(filename: File) -> Vec<tar_node> {
-    Vec::<tar_node>::new()
-}
-
-//Incomplete
-pub fn tar_write(tar: &mut Vec<tar_node>) {
+pub fn tar_write(filename: File, tar: &mut Vec<tar_node>) {
     append_end(tar);
+    //serialize()
+    //write()
 }
 
-//Incomplete
-fn ingest(filename: File) -> Vec<tar_node> {
-    Vec::<tar_node>::new()
+fn ingest(mut filename: File) -> Vec<tar_node> {
+    let mut tar = Vec::<tar_node>::new();
+    match parse_header(&filename) {
+        Some(n) => {
+            tar.push(tar_node {
+                header: n,
+                data: parse_data(&filename),
+            });
+        }
+        _ => {}
+    };
+    tar
 }
 //Incomplete
-fn parse_header(filename: File) -> Option<tar_header> {
+fn parse_header(filename: &File) -> Option<tar_header> {
     let header: tar_header = tar_header::default();
     Some(header)
 }
 
-fn parse_data<T: std::io::Read>(mut file: T) -> Vec<[u8;512]> {
-    let mut out = Vec::<[u8;512]>::new();
+fn parse_data<T: std::io::Read>(mut file: T) -> Vec<[u8; 512]> {
+    let mut out = Vec::<[u8; 512]>::new();
     loop {
         let mut buf: [u8; 512] = [0; 512];
         let len = file.read(&mut buf).unwrap();
@@ -114,7 +127,7 @@ fn serialize(tar: Vec<tar_node>) -> Vec<u8> {
 
 fn append_end(tar: &mut Vec<tar_node>) {
     let mut node = tar_node::default();
-    node.data.push([0;512]);
+    node.data.push([0; 512]);
     tar.push(node);
 }
 
