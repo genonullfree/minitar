@@ -115,7 +115,7 @@ fn parse_data<T: std::io::Read>(mut file: T) -> Vec<[u8; 512]> {
     let mut out = Vec::<[u8; 512]>::new();
     loop {
         let mut buf: [u8; 512] = [0; 512];
-        let len = file.read(&mut buf).unwrap();
+        let len = file.read(&mut buf).expect("Failed to read");
         if len == 0 {
             break;
         }
@@ -170,7 +170,7 @@ fn convert_header_to_oct(header: tar_header) -> tar_header {
 }
 
 fn oct_to_dec(input: &[u8]) -> usize {
-    usize::from_str_radix(str::from_utf8(&input).unwrap(), 8).unwrap()
+    usize::from_str_radix(str::from_utf8(&input).expect("Cannot convert utf8"), 8).expect("Cannot convert oct to decimal")
 }
 
 //Incomplete
