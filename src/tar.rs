@@ -5,6 +5,7 @@ use std::fs::File;
 use std::str;
 use std::io::Read;
 use std::io::Write;
+use std::fs::Metadata;
 use std::string::String;
 
 #[repr(u8)]
@@ -81,14 +82,17 @@ impl Default for tar_node {
 pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 
 //Incomplete
-pub fn file_open(filename: String) -> Vec<tar_node> {
+pub fn file_read(filename: String) -> Vec<tar_node> {
     /* TODO: Use for opening regular files */
-    let file = File::open(filename).expect("Could not open file");
+    let mut file = File::open(filename).expect("Could not open file");
+    let mut tar = Vec::<tar_node>::new();
 
-    /* TODO: Finish this */
-    let out = Vec::<tar_node>::new();
+    tar.push(tar_node {
+        header: generate_header(&mut file),
+        data: read_file(&mut file),
+    });
 
-    out
+    tar
 }
 
 pub fn tar_read(filename: String) -> Vec<tar_node> {
@@ -113,6 +117,7 @@ pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
     file.flush().expect("Error flushing file");
 }
 
+//Incomplete
 fn ingest(filename: &mut File) -> Vec<tar_node> {
     /* TODO: While (read_tar_header), get next file */
     let mut tar = Vec::<tar_node>::new();
@@ -133,6 +138,11 @@ fn validate_magic(header: &tar_header) -> bool {
     /* Validate magic header value with magic value */
     let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
     header.ustar_magic == magic
+}
+
+//Incomplete
+fn generate_header(filename: &mut File) -> tar_header {
+    tar_header::default()
 }
 
 fn read_tar_header(filename: &mut File) -> Option<tar_header> {
@@ -162,6 +172,26 @@ fn read_tar_header(filename: &mut File) -> Option<tar_header> {
     }
 
     None
+}
+
+fn read_file<T: std::io::Read>(file: &mut T) -> Vec<[u8; 512]> {
+    /* Extract the file data from the tar file */
+    let mut out = Vec::<[u8; 512]>::new();
+
+    loop {
+        /* Carve out 512 bytes at a time */
+        let mut buf: [u8; 512] = [0; 512];
+        let len = file.read(&mut buf).expect("Failed to read");
+
+        /* If read len == 0, we've hit the EOF */
+        if len == 0 {
+            break;
+        }
+
+        /* Save this chunk */
+        out.push(buf);
+    }
+    out
 }
 
 fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 512]> {
