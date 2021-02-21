@@ -9,7 +9,7 @@ fn open_tar_file() {
 
 #[test]
 fn write_tar_file() {
-    let mut data = file_open("1.tar".to_string());
+    let mut data = file_open("1.txt".to_string());
 
     tar_write("2.tar".to_string(), &mut data);
 }

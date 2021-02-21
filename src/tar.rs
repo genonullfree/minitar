@@ -34,6 +34,7 @@ pub struct tar_header {
     device_major: [u8; 8],
     device_minor: [u8; 8],
     file_prefix: [u8; 155],
+    reserved: [u8; 12],
 }
 
 impl Default for tar_header {
@@ -55,6 +56,7 @@ impl Default for tar_header {
             device_major: [0; 8],
             device_minor: [0; 8],
             file_prefix: [0; 155],
+            reserved: [0; 12],
         }
     }
 }
@@ -82,6 +84,11 @@ pub fn file_open(filename: String) -> Vec<tar_node> {
     let out = ingest(file);
 
     out
+}
+
+//Incomplete
+pub fn tar_read(filename: String) -> Vec<tar_node> {
+    Vec::<tar_node>::new()
 }
 
 pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
@@ -147,6 +154,7 @@ fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
         out.extend_from_slice(&node.header.device_major);
         out.extend_from_slice(&node.header.device_minor);
         out.extend_from_slice(&node.header.file_prefix);
+        out.extend_from_slice(&node.header.reserved);
         for d in &node.data {
             out.extend_from_slice(d);
         }
@@ -156,7 +164,14 @@ fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
 
 fn append_end(tar: &mut Vec<tar_node>) {
     let mut node = tar_node::default();
-    node.data.push([0; 512]);
+    let mut i = 0;
+    loop {
+        node.data.push([0; 512]);
+        i += 1;
+        if i > 16 {
+            break;
+        }
+    }
     tar.push(node);
 }
 
