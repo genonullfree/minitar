@@ -5,7 +5,8 @@ use std::fs::File;
 use std::str;
 use std::io::Read;
 use std::io::Write;
-use std::fs::Metadata;
+use std::fs;
+use std::os::linux::fs::MetadataExt;
 use std::string::String;
 
 #[repr(u8)]
@@ -84,11 +85,11 @@ pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 //Incomplete
 pub fn file_read(filename: String) -> Vec<tar_node> {
     /* TODO: Use for opening regular files */
-    let mut file = File::open(filename).expect("Could not open file");
+    let mut file = File::open(&filename).expect("Could not open file");
     let mut tar = Vec::<tar_node>::new();
 
     tar.push(tar_node {
-        header: generate_header(&mut file),
+        header: generate_header(&filename),
         data: read_file(&mut file),
     });
 
@@ -141,8 +142,22 @@ fn validate_magic(header: &tar_header) -> bool {
 }
 
 //Incomplete
-fn generate_header(filename: &mut File) -> tar_header {
-    tar_header::default()
+fn generate_header(filename: &String) -> tar_header {
+    let mut head = tar_header::default();
+    let meta = fs::metadata(&filename).expect("Failed to get file metadata");
+
+    /* Fill in metadata */
+    head.file_name[..filename.len()].copy_from_slice(&filename.as_bytes());
+    let mode = format!("{:07o}", meta.st_mode());
+    head.file_mode[..mode.len()].copy_from_slice(mode.as_bytes());
+    let user = format!("{:07o}", meta.st_uid());
+    head.own_user[..user.len()].copy_from_slice(user.as_bytes());
+    let group = format!("{:07o}", meta.st_gid());
+    head.own_group[..group.len()].copy_from_slice(group.as_bytes());
+    let size = format!("{:012o}", meta.st_size());
+    head.file_size[..size.len()].copy_from_slice(size.as_bytes());
+
+    head
 }
 
 fn read_tar_header(filename: &mut File) -> Option<tar_header> {
