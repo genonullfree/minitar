@@ -154,8 +154,25 @@ fn generate_header(filename: &String) -> tar_header {
     head.own_user[..user.len()].copy_from_slice(user.as_bytes());
     let group = format!("{:07o}", meta.st_gid());
     head.own_group[..group.len()].copy_from_slice(group.as_bytes());
-    let size = format!("{:012o}", meta.st_size());
+    let size = format!("{:011o}", meta.st_size());
     head.file_size[..size.len()].copy_from_slice(size.as_bytes());
+    let mtime = format!("{:011o}", meta.st_mtime());
+    head.mod_time[..mtime.len()].copy_from_slice(mtime.as_bytes());
+    // let checksum
+    // let linktype
+    // let link_name
+    let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
+    head.ustar_magic[..magic.len()].copy_from_slice(&magic);
+    let version: [u8; 2] = [ 0x20, 0x00 ];
+    head.ustar_version[..version.len()].copy_from_slice(&version);
+    // let user_name
+    // let group_name
+    /*
+    let major = format!("{:07o}", meta.st_dev());
+    head.device_major[..major.len()].copy_from_slice(major.as_bytes());
+    let minor = format!("{:07o}", meta.st_rdev());
+    head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
+    */
 
     head
 }
