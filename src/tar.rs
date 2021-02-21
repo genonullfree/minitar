@@ -80,15 +80,19 @@ impl Default for tar_node {
 //Incomplete
 pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 
+//Incomplete
 pub fn file_open(filename: String) -> Vec<tar_node> {
-    let mut file = File::open(filename).expect("Could not open file");
+    /* TODO: Use for opening regular files */
+    let file = File::open(filename).expect("Could not open file");
 
-    let out = ingest(&mut file);
+    /* TODO: Finish this */
+    let out = Vec::<tar_node>::new();
 
     out
 }
 
 pub fn tar_read(filename: String) -> Vec<tar_node> {
+    /* Open and ingest a tar file for processing */
     let mut file = File::open(filename).expect("Could not open file");
 
     let out = ingest(&mut file);
@@ -97,16 +101,20 @@ pub fn tar_read(filename: String) -> Vec<tar_node> {
 }
 
 pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
+    /* Append the end 0x00 bytes for the file footer */
     append_end(tar);
+
+    /* Serialize the tar data */
     let flat = serialize(&tar);
 
+    /* Create and write the tar data to file */
     let mut file = File::create(filename).expect("Error creating file");
-
     file.write_all(&flat).expect("Error writing file");
     file.flush().expect("Error flushing file");
 }
 
 fn ingest(filename: &mut File) -> Vec<tar_node> {
+    /* TODO: While (read_tar_header), get next file */
     let mut tar = Vec::<tar_node>::new();
     match read_tar_header(filename) {
         Some(n) => {
@@ -122,30 +130,33 @@ fn ingest(filename: &mut File) -> Vec<tar_node> {
 }
 
 fn validate_magic(header: &tar_header) -> bool {
+    /* Validate magic header value with magic value */
     let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
     header.ustar_magic == magic
 }
 
 fn read_tar_header(filename: &mut File) -> Option<tar_header> {
+    /* Create a new tar_header struct and read in the values */
     let mut header: tar_header = tar_header::default();
-    filename.read_exact(&mut header.file_name);
-    filename.read_exact(&mut header.file_mode);
-    filename.read_exact(&mut header.own_user);
-    filename.read_exact(&mut header.own_group);
-    filename.read_exact(&mut header.file_size);
-    filename.read_exact(&mut header.mod_time);
-    filename.read_exact(&mut header.header_checksum);
-    filename.read_exact(&mut header.link_indicator);
-    filename.read_exact(&mut header.link_name);
-    filename.read_exact(&mut header.ustar_magic);
-    filename.read_exact(&mut header.ustar_version);
-    filename.read_exact(&mut header.own_user_name);
-    filename.read_exact(&mut header.own_group_name);
-    filename.read_exact(&mut header.device_major);
-    filename.read_exact(&mut header.device_minor);
-    filename.read_exact(&mut header.file_prefix);
-    filename.read_exact(&mut header.reserved);
+    filename.read_exact(&mut header.file_name).expect("Error reading file_name");
+    filename.read_exact(&mut header.file_mode).expect("Error reading file_mode");
+    filename.read_exact(&mut header.own_user).expect("Error reading own_user");
+    filename.read_exact(&mut header.own_group).expect("Error reading own_group");
+    filename.read_exact(&mut header.file_size).expect("Error reading file_size");
+    filename.read_exact(&mut header.mod_time).expect("Error reading mod_time");
+    filename.read_exact(&mut header.header_checksum).expect("Error reading header_checksum");
+    filename.read_exact(&mut header.link_indicator).expect("Error reading link_indicator");
+    filename.read_exact(&mut header.link_name).expect("Error reading link_name");
+    filename.read_exact(&mut header.ustar_magic).expect("Error reading ustar_magic");
+    filename.read_exact(&mut header.ustar_version).expect("Error reading ustar_version");
+    filename.read_exact(&mut header.own_user_name).expect("Error reading own_user_name");
+    filename.read_exact(&mut header.own_group_name).expect("Error reading own_group_name");
+    filename.read_exact(&mut header.device_major).expect("Error reading device_major");
+    filename.read_exact(&mut header.device_minor).expect("Error reading device_minor");
+    filename.read_exact(&mut header.file_prefix).expect("Error reading file_prefix");
+    filename.read_exact(&mut header.reserved).expect("Error reading reserved");
 
+    /* Validate the header magic value */
     if validate_magic(&header) {
         return Some(header);
     }
@@ -154,17 +165,24 @@ fn read_tar_header(filename: &mut File) -> Option<tar_header> {
 }
 
 fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 512]> {
+    /* Extract the file data from the tar file */
     let mut out = Vec::<[u8; 512]>::new();
     let mut size = 0;
     loop {
+        /* Carve out 512 bytes at a time */
         let mut buf: [u8; 512] = [0; 512];
         let len = file.read(&mut buf).expect("Failed to read");
+
+        /* If read len == 0, we've hit the EOF */
         if len == 0 {
             break;
         }
 
+        /* Save this chunk */
         out.push(buf);
         size += len;
+
+        /* If we've hit the requested file size, end now */
         if size >= file_size {
             break;
         }
@@ -173,7 +191,9 @@ fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 51
 }
 
 fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
+    /* Serialize the header and data for writing */
     let mut out = Vec::<u8>::new();
+    /* Iterate through each header value */
     for node in tar {
         out.extend_from_slice(&node.header.file_name);
         out.extend_from_slice(&node.header.file_mode);
@@ -192,6 +212,7 @@ fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
         out.extend_from_slice(&node.header.device_minor);
         out.extend_from_slice(&node.header.file_prefix);
         out.extend_from_slice(&node.header.reserved);
+        /* Iterate through each data chunk */
         for d in &node.data {
             out.extend_from_slice(d);
         }
@@ -200,6 +221,7 @@ fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
 }
 
 fn append_end(tar: &mut Vec<tar_node>) {
+    /* Append the empty blocks of 0x00's at the end */
     let mut node = tar_node::default();
     let mut i = 0;
     loop {
@@ -212,22 +234,12 @@ fn append_end(tar: &mut Vec<tar_node>) {
     tar.push(node);
 }
 
-//Incomplete
-fn convert_header_to_dec(header: tar_header) -> tar_header {
-    let header: tar_header = tar_header::default();
-    header
-}
-
-//Incomplete
-fn convert_header_to_oct(header: tar_header) -> tar_header {
-    let header: tar_header = tar_header::default();
-    header
-}
-
 fn oct_to_dec(input: &[u8]) -> usize {
+    /* Convert the &[u8] to string and remove the null byte */
     let mut s = str::from_utf8(&input).expect("Cannot convert utf8").to_string();
     s.pop();
 
+    /* Convert to usize from octal */
     usize::from_str_radix(&s, 8).expect("Cannot convert oct to decimal")
 }
 
