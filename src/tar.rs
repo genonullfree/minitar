@@ -3,7 +3,9 @@
 
 use std::fs::File;
 use std::str;
+use std::io::Read;
 use std::io::Write;
+use std::string::String;
 
 #[repr(u8)]
 pub enum type_flag {
@@ -79,16 +81,19 @@ impl Default for tar_node {
 pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 
 pub fn file_open(filename: String) -> Vec<tar_node> {
-    let file = File::open(filename).expect("Could not open file");
+    let mut file = File::open(filename).expect("Could not open file");
 
-    let out = ingest(file);
+    let out = ingest(&mut file);
 
     out
 }
 
-//Incomplete
 pub fn tar_read(filename: String) -> Vec<tar_node> {
-    Vec::<tar_node>::new()
+    let mut file = File::open(filename).expect("Could not open file");
+
+    let out = ingest(&mut file);
+
+    out
 }
 
 pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
@@ -101,13 +106,14 @@ pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
     file.flush().expect("Error flushing file");
 }
 
-fn ingest(filename: File) -> Vec<tar_node> {
+fn ingest(filename: &mut File) -> Vec<tar_node> {
     let mut tar = Vec::<tar_node>::new();
-    match generate_header(&filename) {
+    match read_tar_header(filename) {
         Some(n) => {
+            let o = oct_to_dec(&n.file_size);
             tar.push(tar_node {
                 header: n,
-                data: parse_data(&filename),
+                data: extract_file(filename, o),
             });
         }
         _ => {}
@@ -115,14 +121,41 @@ fn ingest(filename: File) -> Vec<tar_node> {
     tar
 }
 
-//Incomplete
-fn generate_header(filename: &File) -> Option<tar_header> {
-    let header: tar_header = tar_header::default();
-    Some(header)
+fn validate_magic(header: &tar_header) -> bool {
+    let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
+    header.ustar_magic == magic
 }
 
-fn parse_data<T: std::io::Read>(mut file: T) -> Vec<[u8; 512]> {
+fn read_tar_header(filename: &mut File) -> Option<tar_header> {
+    let mut header: tar_header = tar_header::default();
+    filename.read_exact(&mut header.file_name);
+    filename.read_exact(&mut header.file_mode);
+    filename.read_exact(&mut header.own_user);
+    filename.read_exact(&mut header.own_group);
+    filename.read_exact(&mut header.file_size);
+    filename.read_exact(&mut header.mod_time);
+    filename.read_exact(&mut header.header_checksum);
+    filename.read_exact(&mut header.link_indicator);
+    filename.read_exact(&mut header.link_name);
+    filename.read_exact(&mut header.ustar_magic);
+    filename.read_exact(&mut header.ustar_version);
+    filename.read_exact(&mut header.own_user_name);
+    filename.read_exact(&mut header.own_group_name);
+    filename.read_exact(&mut header.device_major);
+    filename.read_exact(&mut header.device_minor);
+    filename.read_exact(&mut header.file_prefix);
+    filename.read_exact(&mut header.reserved);
+
+    if validate_magic(&header) {
+        return Some(header);
+    }
+
+    None
+}
+
+fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 512]> {
     let mut out = Vec::<[u8; 512]>::new();
+    let mut size = 0;
     loop {
         let mut buf: [u8; 512] = [0; 512];
         let len = file.read(&mut buf).expect("Failed to read");
@@ -130,7 +163,11 @@ fn parse_data<T: std::io::Read>(mut file: T) -> Vec<[u8; 512]> {
             break;
         }
 
-        out.push(buf)
+        out.push(buf);
+        size += len;
+        if size >= file_size {
+            break;
+        }
     }
     out
 }
@@ -188,7 +225,10 @@ fn convert_header_to_oct(header: tar_header) -> tar_header {
 }
 
 fn oct_to_dec(input: &[u8]) -> usize {
-    usize::from_str_radix(str::from_utf8(&input).expect("Cannot convert utf8"), 8).expect("Cannot convert oct to decimal")
+    let mut s = str::from_utf8(&input).expect("Cannot convert utf8").to_string();
+    s.pop();
+
+    usize::from_str_radix(&s, 8).expect("Cannot convert oct to decimal")
 }
 
 //Incomplete

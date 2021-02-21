@@ -13,3 +13,10 @@ fn write_tar_file() {
 
     tar_write("2.tar".to_string(), &mut data);
 }
+
+#[test]
+fn read_write_tar_file() {
+    let mut data = tar_read("1.tar".to_string());
+
+    tar_write("3.tar".to_string(), &mut data);
+}
