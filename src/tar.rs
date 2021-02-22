@@ -6,7 +6,9 @@ use std::str;
 use std::io::Read;
 use std::io::Write;
 use std::fs;
+use std::fs::Metadata;
 use std::os::linux::fs::MetadataExt;
+use std::os::unix::prelude::FileTypeExt;
 use std::string::String;
 
 #[repr(u8)]
@@ -21,6 +23,7 @@ pub enum type_flag {
     Unknown = 0x00,
 }
 
+#[derive(Clone)]
 pub struct tar_header {
     file_name: [u8; 100],
     file_mode: [u8; 8],
@@ -65,6 +68,7 @@ impl Default for tar_header {
     }
 }
 
+#[derive(Clone)]
 pub struct tar_node {
     header: tar_header,
     data: Vec<[u8; 512]>,
@@ -141,10 +145,25 @@ fn validate_magic(header: &tar_header) -> bool {
     header.ustar_magic == magic
 }
 
+fn get_file_type(file_type: &FileTypeExt, meta: &Metadata) -> [u8; 1] {
+    if file_type.is_fifo() {
+        return [0x36];
+    } else if file_type.is_char_device() {
+        return [0x33];
+    } else if file_type.is_block_device() {
+        return [0x34];
+    } else if meta.is_dir() {
+        return [0x35];
+    }
+    /* Normal file meta.is_file() */
+    return [0x30];
+}
+
 //Incomplete
 fn generate_header(filename: &String) -> tar_header {
     let mut head = tar_header::default();
     let meta = fs::metadata(&filename).expect("Failed to get file metadata");
+    let file_type = meta.file_type();
 
     /* Fill in metadata */
     head.file_name[..filename.len()].copy_from_slice(&filename.as_bytes());
@@ -158,9 +177,11 @@ fn generate_header(filename: &String) -> tar_header {
     head.file_size[..size.len()].copy_from_slice(size.as_bytes());
     let mtime = format!("{:011o}", meta.st_mtime());
     head.mod_time[..mtime.len()].copy_from_slice(mtime.as_bytes());
-    // let checksum
-    // let linktype
-    // let link_name
+    let checksum: [u8; 8] = [0x20; 8];
+    head.header_checksum.copy_from_slice(&checksum);
+    // let linktype ...default '0'
+    head.link_indicator = get_file_type(&file_type, &meta);
+    // let link_name ...default '' ...fs::symlink_metadata
     let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
     head.ustar_magic[..magic.len()].copy_from_slice(&magic);
     let version: [u8; 2] = [ 0x20, 0x00 ];
@@ -173,6 +194,9 @@ fn generate_header(filename: &String) -> tar_header {
     let minor = format!("{:07o}", meta.st_rdev());
     head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
     */
+
+    let checksum = format!("{:06}\x00", checksum_header(head.clone()));
+    head.header_checksum[..checksum.len()].copy_from_slice(&checksum.as_bytes());
 
     head
 }
@@ -250,6 +274,20 @@ fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 51
         }
     }
     out
+}
+
+fn checksum_header(tar: tar_header) -> u64 {
+    let mut node = Vec::<tar_node>::new();
+    node.push(tar_node {
+        header: tar,
+        data: Vec::<[u8; 512]>::new()
+    });
+    let out = serialize(&node);
+    let mut checksum: u64 = 0;
+    for i in &out[..512] {
+        checksum += *i as u64;
+    }
+    checksum
 }
 
 fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
