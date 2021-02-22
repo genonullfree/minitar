@@ -1,6 +1,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_camel_case)]
 
+use std::env;
 use std::fs::File;
 use std::str;
 use std::io::Read;
@@ -179,16 +180,21 @@ fn generate_header(filename: &String) -> tar_header {
     head.mod_time[..mtime.len()].copy_from_slice(mtime.as_bytes());
     let checksum: [u8; 8] = [0x20; 8];
     head.header_checksum.copy_from_slice(&checksum);
-    // let linktype ...default '0'
     head.link_indicator = get_file_type(&file_type, &meta);
+    /* Get link_name via fs::symlink_metadata */
     // let link_name ...default '' ...fs::symlink_metadata
     let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
     head.ustar_magic[..magic.len()].copy_from_slice(&magic);
     let version: [u8; 2] = [ 0x20, 0x00 ];
     head.ustar_version[..version.len()].copy_from_slice(&version);
-    // let user_name
-    // let group_name
-    /*
+    /* TODO: Find better way to get username */
+    let key = "USER";
+    match env::var(key) {
+        Ok(val) => head.own_user_name[..val.len()].copy_from_slice(&val.as_bytes()),
+        _ => {},
+    }
+    /* TODO: Find way to get groupname */
+    /* TODO: Get major and minor device numbers when applicable
     let major = format!("{:07o}", meta.st_dev());
     head.device_major[..major.len()].copy_from_slice(major.as_bytes());
     let minor = format!("{:07o}", meta.st_rdev());
