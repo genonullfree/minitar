@@ -1,10 +1,9 @@
+#[allow(unused_imports)]
 use crate::tar::*;
 
 #[test]
 fn open_tar_file() {
-    let data = file_read("1.tar".to_string());
-
-    println!("{}", data.len());
+    file_read("1.tar".to_string());
 }
 
 #[test]

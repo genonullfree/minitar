@@ -1,5 +1,4 @@
 #![allow(non_camel_case_types)]
-#![allow(non_camel_case)]
 
 use std::env;
 use std::fs::File;
@@ -85,7 +84,7 @@ impl Default for tar_node {
 }
 
 //Incomplete
-pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
+//pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
 
 //Incomplete
 pub fn file_read(filename: String) -> Vec<tar_node> {
@@ -146,7 +145,7 @@ fn validate_magic(header: &tar_header) -> bool {
     header.ustar_magic == magic
 }
 
-fn get_file_type(file_type: &FileTypeExt, meta: &Metadata) -> [u8; 1] {
+fn get_file_type(file_type: &dyn FileTypeExt, meta: &Metadata) -> [u8; 1] {
     if file_type.is_fifo() {
         return [0x36];
     } else if file_type.is_char_device() {
@@ -347,9 +346,4 @@ fn oct_to_dec(input: &[u8]) -> usize {
 
     /* Convert to usize from octal */
     usize::from_str_radix(&s, 8).expect("Cannot convert oct to decimal")
-}
-
-//Incomplete
-fn dec_to_oct(input: usize) -> Vec<u8> {
-    Vec::<u8>::new()
 }
