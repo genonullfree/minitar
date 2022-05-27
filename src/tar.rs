@@ -11,6 +11,7 @@ use std::os::linux::fs::MetadataExt;
 #[cfg(target_os = "macos")]
 use std::os::macos::fs::MetadataExt;
 use std::os::unix::prelude::FileTypeExt;
+use std::path::Path;
 use std::str;
 use std::string::String;
 
@@ -170,10 +171,16 @@ fn generate_header(filename: &String) -> tar_header {
     let mut head = tar_header::default();
     let meta = fs::metadata(&filename).expect("Failed to get file metadata");
     let file_type = meta.file_type();
+    let name = Path::new(&filename)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
 
     /* Fill in metadata */
-    head.file_name[..filename.len()].copy_from_slice(&filename.as_bytes());
-    let mode = format!("{:07o}", meta.st_mode());
+    head.file_name[..name.len()].copy_from_slice(&name.as_bytes());
+    let mode = format!("{:07o}", (meta.st_mode() & 0o777));
     head.file_mode[..mode.len()].copy_from_slice(mode.as_bytes());
     let user = format!("{:07o}", meta.st_uid());
     head.own_user[..user.len()].copy_from_slice(user.as_bytes());
@@ -206,7 +213,7 @@ fn generate_header(filename: &String) -> tar_header {
     head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
     */
 
-    let checksum = format!("{:06}\x00", checksum_header(head.clone()));
+    let checksum = format!("{:06o}\x00", checksum_header(head.clone()));
     head.header_checksum[..checksum.len()].copy_from_slice(&checksum.as_bytes());
 
     head
@@ -219,12 +226,30 @@ fn read_tar_header(filename: &mut File) -> Option<tar_header> {
     filename.read_exact(&mut buf).expect("Error reading header");
     let (_, header) = tar_header::from_bytes((buf.as_ref(), 0)).unwrap();
 
+    let check_header = header.clone();
+    validate_header_checksum(check_header);
     /* Validate the header magic value */
     if validate_magic(&header) {
         return Some(header);
     }
 
     None
+}
+
+fn validate_header_checksum(mut header: tar_header) -> bool {
+    let orig: [u8; 8] = header.header_checksum;
+    let mut new = [0x20u8; 8];
+    header.header_checksum.copy_from_slice(&[0x20; 8]);
+
+    let tmp = format!("{:06o}\x00", checksum_header(header.clone()));
+    new[..tmp.len()].copy_from_slice(&tmp.as_bytes());
+
+    if orig == new {
+        return true;
+    }
+
+    println!("orig: {:02x?} new: {:02x?}", orig, new);
+    false
 }
 
 fn read_file<T: std::io::Read>(file: &mut T) -> Vec<[u8; 512]> {
@@ -274,15 +299,10 @@ fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 51
 }
 
 fn checksum_header(tar: tar_header) -> u64 {
-    let mut node = Vec::<tar_node>::new();
-    node.push(tar_node {
-        header: tar,
-        data: Vec::<[u8; 512]>::new(),
-    });
-    let out = serialize(&node);
+    let out = tar.to_bytes().unwrap();
     let mut checksum: u64 = 0;
-    for i in &out[..512] {
-        checksum += *i as u64;
+    for i in out {
+        checksum += i as u64;
     }
     checksum
 }
