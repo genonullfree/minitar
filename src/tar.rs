@@ -84,9 +84,9 @@ pub struct tar_node {
 
 impl tar_node {
     pub fn write<T: std::io::Write>(self, mut input: T) -> Result<(), Error> {
-        input.write(&self.header.to_bytes().unwrap())?;
+        input.write_all(&self.header.to_bytes().unwrap())?;
         for d in self.data {
-            input.write(&d)?;
+            input.write_all(&d)?;
         }
 
         Ok(())
@@ -95,16 +95,25 @@ impl tar_node {
 
 #[derive(Clone, Default)]
 pub struct TarFile {
-    files: Vec<tar_node>,
+    file: Vec<tar_node>,
 }
 
 impl TarFile {
-    pub fn write<T: std::io::Write + Copy>(self, input: T) -> Result<(), Error> {
-        for f in self.files {
+    pub fn write<T: std::io::Write + Copy>(self, mut input: T) -> Result<(), Error> {
+        for f in self.file {
             f.write(input)?;
         }
 
+        /* Complete the write with 18 blocks of 512 ``0x00`` bytes per the specification */
+        input.write_all(&[0; 9216])?;
+
         Ok(())
+    }
+
+    pub fn new(filename: String) -> Result<Self, Error> {
+        Ok(TarFile {
+            file: file_read(filename),
+        })
     }
 }
 
