@@ -1,7 +1,6 @@
-use std::fs::File;
-
 #[allow(unused_imports)]
 use crate::tar::*;
+use std::fs::File;
 
 #[test]
 fn open_tar_file() {

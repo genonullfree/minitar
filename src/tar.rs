@@ -112,7 +112,7 @@ impl TarFile {
 
     pub fn new(filename: String) -> Result<Self, Error> {
         Ok(TarFile {
-            file: file_read(filename),
+            file: vec![TarFile::read_file_to_tar(filename)?],
         })
     }
 
@@ -121,10 +121,36 @@ impl TarFile {
 
         Ok(())
     }
-}
 
-//Incomplete
-//pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
+    fn read_file_to_tar(filename: String) -> Result<tar_node, Error> {
+        Ok(tar_node {
+            header: generate_header(&filename),
+            data: TarFile::chunk_file(&filename)?,
+        })
+    }
+
+    fn chunk_file(filename: &String) -> Result<Vec<[u8; 512]>, Error> {
+        let mut file = File::open(filename)?;
+
+        /* Extract the file data from the tar file */
+        let mut out = Vec::<[u8; 512]>::new();
+
+        loop {
+            /* Carve out 512 bytes at a time */
+            let mut buf: [u8; 512] = [0; 512];
+            let len = file.read(&mut buf).expect("Failed to read");
+
+            /* If read len == 0, we've hit the EOF */
+            if len == 0 {
+                break;
+            }
+
+            /* Save this chunk */
+            out.push(buf);
+        }
+        Ok(out)
+    }
+}
 
 //Incomplete
 pub fn file_read(filename: String) -> Vec<tar_node> {
