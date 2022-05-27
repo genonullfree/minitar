@@ -75,19 +75,10 @@ impl Default for tar_header {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct tar_node {
     header: tar_header,
     data: Vec<[u8; 512]>,
-}
-
-impl Default for tar_node {
-    fn default() -> tar_node {
-        tar_node {
-            header: tar_header::default(),
-            data: Vec::<[u8; 512]>::new(),
-        }
-    }
 }
 
 //Incomplete
@@ -97,23 +88,18 @@ impl Default for tar_node {
 pub fn file_read(filename: String) -> Vec<tar_node> {
     /* TODO: Use for opening regular files */
     let mut file = File::open(&filename).expect("Could not open file");
-    let mut tar = Vec::<tar_node>::new();
 
-    tar.push(tar_node {
+    vec![tar_node {
         header: generate_header(&filename),
         data: read_file(&mut file),
-    });
-
-    tar
+    }]
 }
 
 pub fn tar_read(filename: String) -> Vec<tar_node> {
     /* Open and ingest a tar file for processing */
     let mut file = File::open(filename).expect("Could not open file");
 
-    let out = ingest(&mut file);
-
-    out
+    ingest(&mut file)
 }
 
 pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
@@ -121,7 +107,7 @@ pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
     append_end(tar);
 
     /* Serialize the tar data */
-    let flat = serialize(&tar);
+    let flat = serialize(tar);
 
     /* Create and write the tar data to file */
     let mut file = File::create(filename).expect("Error creating file");
@@ -133,15 +119,12 @@ pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
 fn ingest(filename: &mut File) -> Vec<tar_node> {
     /* TODO: While (read_tar_header), get next file */
     let mut tar = Vec::<tar_node>::new();
-    match read_tar_header(filename) {
-        Some(n) => {
-            let o = oct_to_dec(&n.file_size);
-            tar.push(tar_node {
-                header: n,
-                data: extract_file(filename, o),
-            });
-        }
-        _ => {}
+    if let Some(n) = read_tar_header(filename) {
+        let o = oct_to_dec(&n.file_size);
+        tar.push(tar_node {
+            header: n,
+            data: extract_file(filename, o),
+        });
     };
     tar
 }
@@ -163,7 +146,7 @@ fn get_file_type(file_type: &dyn FileTypeExt, meta: &Metadata) -> [u8; 1] {
         return [0x35];
     }
     /* Normal file meta.is_file() */
-    return [0x30];
+    [0x30]
 }
 
 //Incomplete
@@ -179,7 +162,7 @@ fn generate_header(filename: &String) -> tar_header {
         .to_string();
 
     /* Fill in metadata */
-    head.file_name[..name.len()].copy_from_slice(&name.as_bytes());
+    head.file_name[..name.len()].copy_from_slice(name.as_bytes());
     let mode = format!("{:07o}", (meta.st_mode() & 0o777));
     head.file_mode[..mode.len()].copy_from_slice(mode.as_bytes());
     let user = format!("{:07o}", meta.st_uid());
@@ -201,9 +184,8 @@ fn generate_header(filename: &String) -> tar_header {
     head.ustar_version[..version.len()].copy_from_slice(&version);
     /* TODO: Find better way to get username */
     let key = "USER";
-    match env::var(key) {
-        Ok(val) => head.own_user_name[..val.len()].copy_from_slice(&val.as_bytes()),
-        _ => {}
+    if let Ok(val) = env::var(key) {
+        head.own_user_name[..val.len()].copy_from_slice(val.as_bytes())
     }
     /* TODO: Find way to get groupname */
     /* TODO: Get major and minor device numbers when applicable
@@ -214,7 +196,7 @@ fn generate_header(filename: &String) -> tar_header {
     */
 
     let checksum = format!("{:06o}\x00", checksum_header(head.clone()));
-    head.header_checksum[..checksum.len()].copy_from_slice(&checksum.as_bytes());
+    head.header_checksum[..checksum.len()].copy_from_slice(checksum.as_bytes());
 
     head
 }
@@ -242,7 +224,7 @@ fn validate_header_checksum(mut header: tar_header) -> bool {
     header.header_checksum.copy_from_slice(&[0x20; 8]);
 
     let tmp = format!("{:06o}\x00", checksum_header(header.clone()));
-    new[..tmp.len()].copy_from_slice(&tmp.as_bytes());
+    new[..tmp.len()].copy_from_slice(tmp.as_bytes());
 
     if orig == new {
         return true;
@@ -337,7 +319,7 @@ fn append_end(tar: &mut Vec<tar_node>) {
 
 fn oct_to_dec(input: &[u8]) -> usize {
     /* Convert the &[u8] to string and remove the null byte */
-    let mut s = str::from_utf8(&input)
+    let mut s = str::from_utf8(input)
         .expect("Cannot convert utf8")
         .to_string();
     s.pop();
