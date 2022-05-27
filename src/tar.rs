@@ -4,6 +4,7 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::fs::Metadata;
+use std::io::Error;
 use std::io::Read;
 use std::io::Write;
 #[cfg(target_os = "linux")]
@@ -79,6 +80,32 @@ impl Default for tar_header {
 pub struct tar_node {
     header: tar_header,
     data: Vec<[u8; 512]>,
+}
+
+impl tar_node {
+    pub fn write<T: std::io::Write>(self, mut input: T) -> Result<(), Error> {
+        input.write(&self.header.to_bytes().unwrap())?;
+        for d in self.data {
+            input.write(&d)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct TarFile {
+    files: Vec<tar_node>,
+}
+
+impl TarFile {
+    pub fn write<T: std::io::Write + Copy>(self, input: T) -> Result<(), Error> {
+        for f in self.files {
+            f.write(input)?;
+        }
+
+        Ok(())
+    }
 }
 
 //Incomplete
