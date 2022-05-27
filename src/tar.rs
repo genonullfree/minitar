@@ -1,15 +1,20 @@
 #![allow(non_camel_case_types)]
 
 use std::env;
+use std::fs;
 use std::fs::File;
-use std::str;
+use std::fs::Metadata;
 use std::io::Read;
 use std::io::Write;
-use std::fs;
-use std::fs::Metadata;
+#[cfg(target_os = "linux")]
 use std::os::linux::fs::MetadataExt;
+#[cfg(target_os = "macos")]
+use std::os::macos::fs::MetadataExt;
 use std::os::unix::prelude::FileTypeExt;
+use std::str;
 use std::string::String;
+
+use deku::prelude::*;
 
 #[repr(u8)]
 pub enum type_flag {
@@ -23,7 +28,8 @@ pub enum type_flag {
     Unknown = 0x00,
 }
 
-#[derive(Clone)]
+#[derive(Clone, DekuRead, DekuWrite)]
+#[deku(endian = "little")]
 pub struct tar_header {
     file_name: [u8; 100],
     file_mode: [u8; 8],
@@ -141,7 +147,7 @@ fn ingest(filename: &mut File) -> Vec<tar_node> {
 
 fn validate_magic(header: &tar_header) -> bool {
     /* Validate magic header value with magic value */
-    let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
+    let magic: [u8; 6] = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
     header.ustar_magic == magic
 }
 
@@ -182,15 +188,15 @@ fn generate_header(filename: &String) -> tar_header {
     head.link_indicator = get_file_type(&file_type, &meta);
     /* Get link_name via fs::symlink_metadata */
     // let link_name ...default '' ...fs::symlink_metadata
-    let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
+    let magic: [u8; 6] = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
     head.ustar_magic[..magic.len()].copy_from_slice(&magic);
-    let version: [u8; 2] = [ 0x20, 0x00 ];
+    let version: [u8; 2] = [0x20, 0x00];
     head.ustar_version[..version.len()].copy_from_slice(&version);
     /* TODO: Find better way to get username */
     let key = "USER";
     match env::var(key) {
         Ok(val) => head.own_user_name[..val.len()].copy_from_slice(&val.as_bytes()),
-        _ => {},
+        _ => {}
     }
     /* TODO: Find way to get groupname */
     /* TODO: Get major and minor device numbers when applicable
@@ -208,24 +214,10 @@ fn generate_header(filename: &String) -> tar_header {
 
 fn read_tar_header(filename: &mut File) -> Option<tar_header> {
     /* Create a new tar_header struct and read in the values */
-    let mut header: tar_header = tar_header::default();
-    filename.read_exact(&mut header.file_name).expect("Error reading file_name");
-    filename.read_exact(&mut header.file_mode).expect("Error reading file_mode");
-    filename.read_exact(&mut header.own_user).expect("Error reading own_user");
-    filename.read_exact(&mut header.own_group).expect("Error reading own_group");
-    filename.read_exact(&mut header.file_size).expect("Error reading file_size");
-    filename.read_exact(&mut header.mod_time).expect("Error reading mod_time");
-    filename.read_exact(&mut header.header_checksum).expect("Error reading header_checksum");
-    filename.read_exact(&mut header.link_indicator).expect("Error reading link_indicator");
-    filename.read_exact(&mut header.link_name).expect("Error reading link_name");
-    filename.read_exact(&mut header.ustar_magic).expect("Error reading ustar_magic");
-    filename.read_exact(&mut header.ustar_version).expect("Error reading ustar_version");
-    filename.read_exact(&mut header.own_user_name).expect("Error reading own_user_name");
-    filename.read_exact(&mut header.own_group_name).expect("Error reading own_group_name");
-    filename.read_exact(&mut header.device_major).expect("Error reading device_major");
-    filename.read_exact(&mut header.device_minor).expect("Error reading device_minor");
-    filename.read_exact(&mut header.file_prefix).expect("Error reading file_prefix");
-    filename.read_exact(&mut header.reserved).expect("Error reading reserved");
+    let mut buf = Vec::<u8>::new();
+    buf.resize(512, 0);
+    filename.read_exact(&mut buf).expect("Error reading header");
+    let (_, header) = tar_header::from_bytes((buf.as_ref(), 0)).unwrap();
 
     /* Validate the header magic value */
     if validate_magic(&header) {
@@ -285,7 +277,7 @@ fn checksum_header(tar: tar_header) -> u64 {
     let mut node = Vec::<tar_node>::new();
     node.push(tar_node {
         header: tar,
-        data: Vec::<[u8; 512]>::new()
+        data: Vec::<[u8; 512]>::new(),
     });
     let out = serialize(&node);
     let mut checksum: u64 = 0;
@@ -300,23 +292,7 @@ fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
     let mut out = Vec::<u8>::new();
     /* Iterate through each header value */
     for node in tar {
-        out.extend_from_slice(&node.header.file_name);
-        out.extend_from_slice(&node.header.file_mode);
-        out.extend_from_slice(&node.header.own_user);
-        out.extend_from_slice(&node.header.own_group);
-        out.extend_from_slice(&node.header.file_size);
-        out.extend_from_slice(&node.header.mod_time);
-        out.extend_from_slice(&node.header.header_checksum);
-        out.extend_from_slice(&node.header.link_indicator);
-        out.extend_from_slice(&node.header.link_name);
-        out.extend_from_slice(&node.header.ustar_magic);
-        out.extend_from_slice(&node.header.ustar_version);
-        out.extend_from_slice(&node.header.own_user_name);
-        out.extend_from_slice(&node.header.own_group_name);
-        out.extend_from_slice(&node.header.device_major);
-        out.extend_from_slice(&node.header.device_minor);
-        out.extend_from_slice(&node.header.file_prefix);
-        out.extend_from_slice(&node.header.reserved);
+        out.extend_from_slice(&node.header.to_bytes().unwrap());
         /* Iterate through each data chunk */
         for d in &node.data {
             out.extend_from_slice(d);
@@ -341,7 +317,9 @@ fn append_end(tar: &mut Vec<tar_node>) {
 
 fn oct_to_dec(input: &[u8]) -> usize {
     /* Convert the &[u8] to string and remove the null byte */
-    let mut s = str::from_utf8(&input).expect("Cannot convert utf8").to_string();
+    let mut s = str::from_utf8(&input)
+        .expect("Cannot convert utf8")
+        .to_string();
     s.pop();
 
     /* Convert to usize from octal */
