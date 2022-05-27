@@ -24,6 +24,15 @@ fn write_tar_file_2() {
 }
 
 #[test]
+fn write_tar_file_3() {
+    let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
+    data.append("test/1.txt".to_string()).unwrap();
+
+    let out = File::create("test/5.tar".to_string()).unwrap();
+    data.write(&out).unwrap();
+}
+
+#[test]
 fn read_write_tar_file() {
     let mut data = tar_read("test/1.tar".to_string());
 

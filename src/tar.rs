@@ -115,6 +115,12 @@ impl TarFile {
             file: file_read(filename),
         })
     }
+
+    pub fn append(&mut self, filename: String) -> Result<(), Error> {
+        self.file.append(&mut file_read(filename));
+
+        Ok(())
+    }
 }
 
 //Incomplete
