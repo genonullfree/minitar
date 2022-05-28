@@ -32,7 +32,7 @@ pub enum type_flag {
 
 #[derive(Clone, DekuRead, DekuWrite)]
 #[deku(endian = "little")]
-pub struct tar_header {
+pub struct TarHeader {
     file_name: [u8; 100],
     file_mode: [u8; 8],
     own_user: [u8; 8],
@@ -52,9 +52,9 @@ pub struct tar_header {
     reserved: [u8; 12],
 }
 
-impl Default for tar_header {
-    fn default() -> tar_header {
-        tar_header {
+impl Default for TarHeader {
+    fn default() -> TarHeader {
+        TarHeader {
             file_name: [0; 100],
             file_mode: [0; 8],
             own_user: [0; 8],
@@ -77,12 +77,12 @@ impl Default for tar_header {
 }
 
 #[derive(Clone, Default)]
-pub struct tar_node {
-    header: tar_header,
+pub struct TarNode {
+    header: TarHeader,
     data: Vec<[u8; 512]>,
 }
 
-impl tar_node {
+impl TarNode {
     pub fn write<T: std::io::Write>(self, mut input: T) -> Result<(), Error> {
         input.write_all(&self.header.to_bytes().unwrap())?;
         for d in self.data {
@@ -91,11 +91,60 @@ impl tar_node {
 
         Ok(())
     }
+
+    pub fn read<T: std::io::Read>(&mut self, mut input: T) -> Result<TarNode, Error> {
+        let mut h = vec![0u8; 512];
+        input.read_exact(&mut h)?;
+        let (_, header) = TarHeader::from_bytes((&h, 0)).unwrap();
+        let chunks = (oct_to_dec(&header.file_size) / 512) + 1;
+        Ok(TarNode {
+            header,
+            data: TarNode::chunk_file(&mut input, Some(chunks))?,
+        })
+    }
+
+    fn read_file_to_tar(filename: String) -> Result<TarNode, Error> {
+        let mut file = File::open(&filename)?;
+        Ok(TarNode {
+            header: generate_header(&filename),
+            data: TarNode::chunk_file(&mut file, None)?,
+        })
+    }
+
+    fn chunk_file<T: std::io::Read>(
+        file: &mut T,
+        max_chunks: Option<usize>,
+    ) -> Result<Vec<[u8; 512]>, Error> {
+        /* Extract the file data from the tar file */
+        let mut out = Vec::<[u8; 512]>::new();
+        let mut n = if let Some(max) = max_chunks {
+            max
+        } else {
+            usize::MAX
+        };
+
+        loop {
+            /* Carve out 512 bytes at a time */
+            let mut buf: [u8; 512] = [0; 512];
+            let len = file.read(&mut buf).expect("Failed to read");
+
+            n -= 1;
+
+            /* If read len == 0, we've hit the EOF */
+            if len == 0 || n == 0 {
+                break;
+            }
+
+            /* Save this chunk */
+            out.push(buf);
+        }
+        Ok(out)
+    }
 }
 
 #[derive(Clone, Default)]
 pub struct TarFile {
-    file: Vec<tar_node>,
+    file: Vec<TarNode>,
 }
 
 impl TarFile {
@@ -112,7 +161,7 @@ impl TarFile {
 
     pub fn new(filename: String) -> Result<Self, Error> {
         Ok(TarFile {
-            file: vec![TarFile::read_file_to_tar(filename)?],
+            file: vec![TarNode::read_file_to_tar(filename)?],
         })
     }
 
@@ -122,55 +171,30 @@ impl TarFile {
         Ok(())
     }
 
-    fn read_file_to_tar(filename: String) -> Result<tar_node, Error> {
-        Ok(tar_node {
-            header: generate_header(&filename),
-            data: TarFile::chunk_file(&filename)?,
-        })
-    }
-
-    fn chunk_file(filename: &String) -> Result<Vec<[u8; 512]>, Error> {
-        let mut file = File::open(filename)?;
-
-        /* Extract the file data from the tar file */
-        let mut out = Vec::<[u8; 512]>::new();
-
-        loop {
-            /* Carve out 512 bytes at a time */
-            let mut buf: [u8; 512] = [0; 512];
-            let len = file.read(&mut buf).expect("Failed to read");
-
-            /* If read len == 0, we've hit the EOF */
-            if len == 0 {
-                break;
-            }
-
-            /* Save this chunk */
-            out.push(buf);
-        }
-        Ok(out)
-    }
+    /*pub fn open(filename: String) -> Result<Self, Error> {
+        Ok(())
+    }*/
 }
 
 //Incomplete
-pub fn file_read(filename: String) -> Vec<tar_node> {
+pub fn file_read(filename: String) -> Vec<TarNode> {
     /* TODO: Use for opening regular files */
     let mut file = File::open(&filename).expect("Could not open file");
 
-    vec![tar_node {
+    vec![TarNode {
         header: generate_header(&filename),
         data: read_file(&mut file),
     }]
 }
 
-pub fn tar_read(filename: String) -> Vec<tar_node> {
+pub fn tar_read(filename: String) -> Vec<TarNode> {
     /* Open and ingest a tar file for processing */
     let mut file = File::open(filename).expect("Could not open file");
 
     ingest(&mut file)
 }
 
-pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
+pub fn tar_write(filename: String, tar: &mut Vec<TarNode>) {
     /* Append the end 0x00 bytes for the file footer */
     append_end(tar);
 
@@ -184,12 +208,12 @@ pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
 }
 
 //Incomplete
-fn ingest(filename: &mut File) -> Vec<tar_node> {
+fn ingest(filename: &mut File) -> Vec<TarNode> {
     /* TODO: While (read_tar_header), get next file */
-    let mut tar = Vec::<tar_node>::new();
+    let mut tar = Vec::<TarNode>::new();
     if let Some(n) = read_tar_header(filename) {
         let o = oct_to_dec(&n.file_size);
-        tar.push(tar_node {
+        tar.push(TarNode {
             header: n,
             data: extract_file(filename, o),
         });
@@ -197,7 +221,7 @@ fn ingest(filename: &mut File) -> Vec<tar_node> {
     tar
 }
 
-fn validate_magic(header: &tar_header) -> bool {
+fn validate_magic(header: &TarHeader) -> bool {
     /* Validate magic header value with magic value */
     let magic: [u8; 6] = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
     header.ustar_magic == magic
@@ -218,8 +242,8 @@ fn get_file_type(file_type: &dyn FileTypeExt, meta: &Metadata) -> [u8; 1] {
 }
 
 //Incomplete
-fn generate_header(filename: &String) -> tar_header {
-    let mut head = tar_header::default();
+fn generate_header(filename: &String) -> TarHeader {
+    let mut head = TarHeader::default();
     let meta = fs::metadata(&filename).expect("Failed to get file metadata");
     let file_type = meta.file_type();
     let name = Path::new(&filename)
@@ -269,12 +293,12 @@ fn generate_header(filename: &String) -> tar_header {
     head
 }
 
-fn read_tar_header(filename: &mut File) -> Option<tar_header> {
-    /* Create a new tar_header struct and read in the values */
+fn read_tar_header(filename: &mut File) -> Option<TarHeader> {
+    /* Create a new TarHeader struct and read in the values */
     let mut buf = Vec::<u8>::new();
     buf.resize(512, 0);
     filename.read_exact(&mut buf).expect("Error reading header");
-    let (_, header) = tar_header::from_bytes((buf.as_ref(), 0)).unwrap();
+    let (_, header) = TarHeader::from_bytes((buf.as_ref(), 0)).unwrap();
 
     let check_header = header.clone();
     validate_header_checksum(check_header);
@@ -286,7 +310,7 @@ fn read_tar_header(filename: &mut File) -> Option<tar_header> {
     None
 }
 
-fn validate_header_checksum(mut header: tar_header) -> bool {
+fn validate_header_checksum(mut header: TarHeader) -> bool {
     let orig: [u8; 8] = header.header_checksum;
     let mut new = [0x20u8; 8];
     header.header_checksum.copy_from_slice(&[0x20; 8]);
@@ -348,7 +372,7 @@ fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 51
     out
 }
 
-fn checksum_header(tar: tar_header) -> u64 {
+fn checksum_header(tar: TarHeader) -> u64 {
     let out = tar.to_bytes().unwrap();
     let mut checksum: u64 = 0;
     for i in out {
@@ -357,7 +381,7 @@ fn checksum_header(tar: tar_header) -> u64 {
     checksum
 }
 
-fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
+fn serialize(tar: &Vec<TarNode>) -> Vec<u8> {
     /* Serialize the header and data for writing */
     let mut out = Vec::<u8>::new();
     /* Iterate through each header value */
@@ -371,9 +395,9 @@ fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
     out
 }
 
-fn append_end(tar: &mut Vec<tar_node>) {
+fn append_end(tar: &mut Vec<TarNode>) {
     /* Append the empty blocks of 0x00's at the end */
-    let mut node = tar_node::default();
+    let mut node = TarNode::default();
     let mut i = 0;
     loop {
         node.data.push([0; 512]);
