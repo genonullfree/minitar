@@ -199,40 +199,6 @@ pub fn file_read(filename: String) -> Vec<TarNode> {
     }]
 }
 
-pub fn tar_read(filename: String) -> Vec<TarNode> {
-    /* Open and ingest a tar file for processing */
-    let mut file = File::open(filename).expect("Could not open file");
-
-    ingest(&mut file)
-}
-
-pub fn tar_write(filename: String, tar: &mut Vec<TarNode>) {
-    /* Append the end 0x00 bytes for the file footer */
-    append_end(tar);
-
-    /* Serialize the tar data */
-    let flat = serialize(tar);
-
-    /* Create and write the tar data to file */
-    let mut file = File::create(filename).expect("Error creating file");
-    file.write_all(&flat).expect("Error writing file");
-    file.flush().expect("Error flushing file");
-}
-
-//Incomplete
-fn ingest(filename: &mut File) -> Vec<TarNode> {
-    /* TODO: While (read_tar_header), get next file */
-    let mut tar = Vec::<TarNode>::new();
-    if let Some(n) = read_tar_header(filename) {
-        let o = oct_to_dec(&n.file_size);
-        tar.push(TarNode {
-            header: n,
-            data: extract_file(filename, o),
-        });
-    };
-    tar
-}
-
 fn validate_magic(header: &TarHeader) -> bool {
     /* Validate magic header value with magic value */
     let magic: [u8; 6] = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
@@ -305,23 +271,6 @@ fn generate_header(filename: &String) -> TarHeader {
     head
 }
 
-fn read_tar_header(filename: &mut File) -> Option<TarHeader> {
-    /* Create a new TarHeader struct and read in the values */
-    let mut buf = Vec::<u8>::new();
-    buf.resize(512, 0);
-    filename.read_exact(&mut buf).expect("Error reading header");
-    let (_, header) = TarHeader::from_bytes((buf.as_ref(), 0)).unwrap();
-
-    let check_header = header.clone();
-    validate_header_checksum(check_header);
-    /* Validate the header magic value */
-    if validate_magic(&header) {
-        return Some(header);
-    }
-
-    None
-}
-
 fn validate_header_checksum(mut header: TarHeader) -> bool {
     let orig: [u8; 8] = header.header_checksum;
     let mut new = [0x20u8; 8];
@@ -358,32 +307,6 @@ fn read_file<T: std::io::Read>(file: &mut T) -> Vec<[u8; 512]> {
     out
 }
 
-fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 512]> {
-    /* Extract the file data from the tar file */
-    let mut out = Vec::<[u8; 512]>::new();
-    let mut size = 0;
-    loop {
-        /* Carve out 512 bytes at a time */
-        let mut buf: [u8; 512] = [0; 512];
-        let len = file.read(&mut buf).expect("Failed to read");
-
-        /* If read len == 0, we've hit the EOF */
-        if len == 0 {
-            break;
-        }
-
-        /* Save this chunk */
-        out.push(buf);
-        size += len;
-
-        /* If we've hit the requested file size, end now */
-        if size >= file_size {
-            break;
-        }
-    }
-    out
-}
-
 fn checksum_header(tar: TarHeader) -> u64 {
     let out = tar.to_bytes().unwrap();
     let mut checksum: u64 = 0;
@@ -391,34 +314,6 @@ fn checksum_header(tar: TarHeader) -> u64 {
         checksum += i as u64;
     }
     checksum
-}
-
-fn serialize(tar: &Vec<TarNode>) -> Vec<u8> {
-    /* Serialize the header and data for writing */
-    let mut out = Vec::<u8>::new();
-    /* Iterate through each header value */
-    for node in tar {
-        out.extend_from_slice(&node.header.to_bytes().unwrap());
-        /* Iterate through each data chunk */
-        for d in &node.data {
-            out.extend_from_slice(d);
-        }
-    }
-    out
-}
-
-fn append_end(tar: &mut Vec<TarNode>) {
-    /* Append the empty blocks of 0x00's at the end */
-    let mut node = TarNode::default();
-    let mut i = 0;
-    loop {
-        node.data.push([0; 512]);
-        i += 1;
-        if i > 16 {
-            break;
-        }
-    }
-    tar.push(node);
 }
 
 fn oct_to_dec(input: &[u8]) -> usize {
