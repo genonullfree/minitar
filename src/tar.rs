@@ -1,5 +1,3 @@
-#![allow(non_camel_case_types)]
-
 use std::env;
 use std::fs;
 use std::fs::File;
@@ -7,10 +5,6 @@ use std::fs::Metadata;
 use std::io::Error;
 use std::io::Read;
 use std::io::Write;
-#[cfg(target_os = "linux")]
-use std::os::linux::fs::MetadataExt;
-#[cfg(target_os = "macos")]
-use std::os::macos::fs::MetadataExt;
 use std::os::unix::prelude::FileTypeExt;
 use std::path::Path;
 use std::str;
@@ -18,8 +12,13 @@ use std::string::String;
 
 use deku::prelude::*;
 
+#[cfg(target_os = "linux")]
+use std::os::linux::fs::MetadataExt;
+#[cfg(target_os = "macos")]
+use std::os::macos::fs::MetadataExt;
+
 #[repr(u8)]
-pub enum type_flag {
+pub enum FileType {
     Normal = 0x30,
     Hard = 0x31,
     Symbolic = 0x32,
@@ -92,7 +91,7 @@ impl TarNode {
         Ok(())
     }
 
-    pub fn read<T: std::io::Read>(&mut self, mut input: T) -> Result<TarNode, Error> {
+    pub fn read<T: std::io::Read>(mut input: T) -> Result<TarNode, Error> {
         let mut h = vec![0u8; 512];
         input.read_exact(&mut h)?;
         let (_, header) = TarHeader::from_bytes((&h, 0)).unwrap();
@@ -171,9 +170,18 @@ impl TarFile {
         Ok(())
     }
 
-    /*pub fn open(filename: String) -> Result<Self, Error> {
-        Ok(())
-    }*/
+    pub fn open(filename: String) -> Result<Self, Error> {
+        let file = File::open(&filename).unwrap();
+        let mut out = TarFile {
+            file: Vec::<TarNode>::new(),
+        };
+
+        while let Ok(t) = TarNode::read(&file) {
+            out.file.push(t);
+        }
+
+        Ok(out)
+    }
 }
 
 //Incomplete
