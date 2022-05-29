@@ -2,9 +2,9 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::fs::Metadata;
-use std::io::Error;
 use std::io::Read;
 use std::io::Write;
+use std::io::{Error, ErrorKind};
 use std::os::unix::prelude::FileTypeExt;
 use std::path::Path;
 use std::str;
@@ -94,6 +94,10 @@ impl TarNode {
     pub fn read<T: std::io::Read>(mut input: T) -> Result<TarNode, Error> {
         let mut h = vec![0u8; 512];
         input.read_exact(&mut h)?;
+        if h == vec![0u8; 512] {
+            return Err(Error::new(ErrorKind::InvalidData, "End of tar"));
+        }
+
         let (_, header) = TarHeader::from_bytes((&h, 0)).unwrap();
         let chunks = (oct_to_dec(&header.file_size) / 512) + 1;
         Ok(TarNode {
@@ -425,5 +429,5 @@ fn oct_to_dec(input: &[u8]) -> usize {
     s.pop();
 
     /* Convert to usize from octal */
-    usize::from_str_radix(&s, 8).expect("Cannot convert oct to decimal")
+    usize::from_str_radix(&s, 8).unwrap_or_else(|_| panic!("Cannot convert oct to decimal: {}", &s))
 }
