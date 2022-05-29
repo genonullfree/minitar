@@ -2,8 +2,6 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::fs::Metadata;
-use std::io::Read;
-use std::io::Write;
 use std::io::{Error, ErrorKind};
 use std::os::unix::prelude::FileTypeExt;
 use std::path::Path;
@@ -29,7 +27,7 @@ pub enum FileType {
     Unknown = 0x00,
 }
 
-#[derive(Clone, DekuRead, DekuWrite)]
+#[derive(Clone, Copy, DekuRead, DekuWrite, PartialEq)]
 #[deku(endian = "little")]
 pub struct TarHeader {
     file_name: [u8; 100],
@@ -75,6 +73,19 @@ impl Default for TarHeader {
     }
 }
 
+impl TarHeader {
+    pub fn validate_checksum(self) -> bool {
+        let mut test = self;
+        let mut new = [0x20u8; 8];
+        test.header_checksum.copy_from_slice(&[0x20; 8]);
+
+        let tmp = format!("{:06o}\x00", checksum_header(test));
+        new[..tmp.len()].copy_from_slice(tmp.as_bytes());
+
+        self.header_checksum == new
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct TarNode {
     header: TarHeader,
@@ -94,11 +105,15 @@ impl TarNode {
     pub fn read<T: std::io::Read>(mut input: T) -> Result<TarNode, Error> {
         let mut h = vec![0u8; 512];
         input.read_exact(&mut h)?;
-        if h == vec![0u8; 512] {
-            return Err(Error::new(ErrorKind::InvalidData, "End of tar"));
-        }
 
         let (_, header) = TarHeader::from_bytes((&h, 0)).unwrap();
+        if header == TarHeader::default() {
+            return Err(Error::new(ErrorKind::InvalidData, "End of tar"));
+        }
+        if !header.validate_checksum() {
+            return Err(Error::new(ErrorKind::InvalidData, "Invalid checksum"));
+        }
+
         let chunks = (oct_to_dec(&header.file_size) / 512) + 1;
         Ok(TarNode {
             header,
@@ -199,12 +214,6 @@ pub fn file_read(filename: String) -> Vec<TarNode> {
     }]
 }
 
-fn validate_magic(header: &TarHeader) -> bool {
-    /* Validate magic header value with magic value */
-    let magic: [u8; 6] = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
-    header.ustar_magic == magic
-}
-
 fn get_file_type(file_type: &dyn FileTypeExt, meta: &Metadata) -> [u8; 1] {
     if file_type.is_fifo() {
         return [0x36];
@@ -265,26 +274,10 @@ fn generate_header(filename: &String) -> TarHeader {
     head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
     */
 
-    let checksum = format!("{:06o}\x00", checksum_header(head.clone()));
+    let checksum = format!("{:06o}\x00", checksum_header(head));
     head.header_checksum[..checksum.len()].copy_from_slice(checksum.as_bytes());
 
     head
-}
-
-fn validate_header_checksum(mut header: TarHeader) -> bool {
-    let orig: [u8; 8] = header.header_checksum;
-    let mut new = [0x20u8; 8];
-    header.header_checksum.copy_from_slice(&[0x20; 8]);
-
-    let tmp = format!("{:06o}\x00", checksum_header(header.clone()));
-    new[..tmp.len()].copy_from_slice(tmp.as_bytes());
-
-    if orig == new {
-        return true;
-    }
-
-    println!("orig: {:02x?} new: {:02x?}", orig, new);
-    false
 }
 
 fn read_file<T: std::io::Read>(file: &mut T) -> Vec<[u8; 512]> {
