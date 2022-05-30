@@ -122,6 +122,7 @@ pub struct TarNode {
 }
 
 impl TarNode {
+    /// Write out a single file within the tar to a file or something with a ``std::io::Write`` trait.
     pub fn write<T: std::io::Write>(self, mut input: T) -> Result<(), Error> {
         input.write_all(&self.header.to_bytes().unwrap())?;
         for d in self.data {
@@ -131,6 +132,7 @@ impl TarNode {
         Ok(())
     }
 
+    /// Read a TarNode in from a file or something with a ``std::io::Read`` trait.
     pub fn read<T: std::io::Read>(mut input: T) -> Result<TarNode, Error> {
         let mut h = vec![0u8; 512];
         input.read_exact(&mut h)?;
@@ -153,6 +155,7 @@ impl TarNode {
         })
     }
 
+    /// Open and read a file from the ``filename`` argument to a TarNode.
     fn read_file_to_tar(filename: String) -> Result<TarNode, Error> {
         let mut file = File::open(&filename)?;
         Ok(TarNode {
@@ -161,6 +164,7 @@ impl TarNode {
         })
     }
 
+    /// Read in and split a file into ``512`` byte chunks.
     fn chunk_file<T: std::io::Read>(
         file: &mut T,
         max_chunks: Option<usize>,
@@ -199,6 +203,19 @@ pub struct TarFile {
 }
 
 impl TarFile {
+    /// Write out a vector of `TarNodes` to a file or something that implements ``std::io::Write`` and ``std::io::Copy``.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::fs::File;
+    /// use minitar::tar::TarFile;
+    ///
+    /// let data = TarFile::new("test/1.txt".to_string()).unwrap();
+    ///
+    /// let out = File::create("test/2.tar".to_string()).unwrap();
+    /// data.write(&out).unwrap();
+    /// ```
     pub fn write<T: std::io::Write + Copy>(self, mut input: T) -> Result<(), Error> {
         for f in self.file {
             f.write(input)?;
@@ -210,18 +227,48 @@ impl TarFile {
         Ok(())
     }
 
+    /// Create a new `TarFile` struct and initialize it with a `filename` file. This will read in the file to
+    /// the `TarFile` struct as a `TarNode`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarFile;
+    ///
+    /// let data = TarFile::new("test/1.txt".to_string()).unwrap();
+    /// ```
     pub fn new(filename: String) -> Result<Self, Error> {
         Ok(TarFile {
             file: vec![TarNode::read_file_to_tar(filename)?],
         })
     }
 
+    /// Append another file to the `TarFile.file` vector. This adds a file to the internal representation of the tar file.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarFile;
+    ///
+    /// let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
+    /// data.append("test/1.txt".to_string()).unwrap();
+    /// ```
     pub fn append(&mut self, filename: String) -> Result<(), Error> {
         self.file.push(TarNode::read_file_to_tar(filename).unwrap());
 
         Ok(())
     }
 
+    /// Open and load an external tar file into the internal `TarFile` struct. This parses and loads up all the files
+    /// contained within the external tar file.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarFile;
+    ///
+    /// TarFile::open("test/1.tar".to_string()).unwrap();
+    /// ```
     pub fn open(filename: String) -> Result<Self, Error> {
         let file = File::open(&filename).unwrap();
         let mut out = TarFile {
