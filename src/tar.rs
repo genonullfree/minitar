@@ -15,6 +15,7 @@ use std::os::linux::fs::MetadataExt;
 #[cfg(target_os = "macos")]
 use std::os::macos::fs::MetadataExt;
 
+/// Represents the different types of files that can be encoded in a tar file.
 #[repr(u8)]
 pub enum FileType {
     Normal = 0x30,
@@ -27,6 +28,7 @@ pub enum FileType {
     Unknown = 0x00,
 }
 
+/// Encompases all the data that is contained within a Tar File Header.
 #[derive(Clone, Copy, DekuRead, DekuWrite, PartialEq)]
 #[deku(endian = "little")]
 pub struct TarHeader {
@@ -74,6 +76,32 @@ impl Default for TarHeader {
 }
 
 impl TarHeader {
+    /// Validates that the magic value received matches the magic value required in the Tar specification.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarHeader;
+    /// let header = TarHeader::default();
+    /// if !header.validate_magic() {
+    ///     println!("Magic value is invalid");
+    /// }
+    /// ```
+    pub fn validate_magic(self) -> bool {
+        self.ustar_magic == "ustar ".as_bytes()
+    }
+
+    /// Validates the header checksum computes to the expected value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarHeader;
+    /// let header = TarHeader::default();
+    /// if header.validate_checksum() {
+    ///     println!("Checksum is valid");
+    /// }
+    /// ```
     pub fn validate_checksum(self) -> bool {
         let mut test = self;
         let mut new = [0x20u8; 8];
@@ -86,6 +114,7 @@ impl TarHeader {
     }
 }
 
+/// Contains a tar representation of a file.
 #[derive(Clone, Default)]
 pub struct TarNode {
     header: TarHeader,
@@ -109,6 +138,9 @@ impl TarNode {
         let (_, header) = TarHeader::from_bytes((&h, 0)).unwrap();
         if header == TarHeader::default() {
             return Err(Error::new(ErrorKind::InvalidData, "End of tar"));
+        }
+        if !header.validate_magic() {
+            return Err(Error::new(ErrorKind::InvalidData, "Invalid magic"));
         }
         if !header.validate_checksum() {
             return Err(Error::new(ErrorKind::InvalidData, "Invalid checksum"));
@@ -160,6 +192,7 @@ impl TarNode {
     }
 }
 
+/// Contains the vector of files that represent a tar file.
 #[derive(Clone, Default)]
 pub struct TarFile {
     file: Vec<TarNode>,
@@ -184,7 +217,7 @@ impl TarFile {
     }
 
     pub fn append(&mut self, filename: String) -> Result<(), Error> {
-        self.file.append(&mut file_read(filename));
+        self.file.push(TarNode::read_file_to_tar(filename).unwrap());
 
         Ok(())
     }
@@ -201,17 +234,6 @@ impl TarFile {
 
         Ok(out)
     }
-}
-
-//Incomplete
-pub fn file_read(filename: String) -> Vec<TarNode> {
-    /* TODO: Use for opening regular files */
-    let mut file = File::open(&filename).expect("Could not open file");
-
-    vec![TarNode {
-        header: generate_header(&filename),
-        data: read_file(&mut file),
-    }]
 }
 
 fn get_file_type(file_type: &dyn FileTypeExt, meta: &Metadata) -> [u8; 1] {
@@ -278,26 +300,6 @@ fn generate_header(filename: &String) -> TarHeader {
     head.header_checksum[..checksum.len()].copy_from_slice(checksum.as_bytes());
 
     head
-}
-
-fn read_file<T: std::io::Read>(file: &mut T) -> Vec<[u8; 512]> {
-    /* Extract the file data from the tar file */
-    let mut out = Vec::<[u8; 512]>::new();
-
-    loop {
-        /* Carve out 512 bytes at a time */
-        let mut buf: [u8; 512] = [0; 512];
-        let len = file.read(&mut buf).expect("Failed to read");
-
-        /* If read len == 0, we've hit the EOF */
-        if len == 0 {
-            break;
-        }
-
-        /* Save this chunk */
-        out.push(buf);
-    }
-    out
 }
 
 fn checksum_header(tar: TarHeader) -> u64 {
