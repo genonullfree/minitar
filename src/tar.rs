@@ -20,10 +20,10 @@ use std::os::macos::fs::MetadataExt;
 pub enum FileType {
     Normal = 0x30,
     Hard = 0x31,
-    Symbolic = 0x32,
-    Character = 0x33,
+    Sym = 0x32,
+    Char = 0x33,
     Block = 0x34,
-    Directory = 0x35,
+    Dir = 0x35,
     FIFO = 0x36,
     Unknown = 0x00,
 }
@@ -107,10 +107,19 @@ impl TarHeader {
         let mut new = [0x20u8; 8];
         test.header_checksum.copy_from_slice(&[0x20; 8]);
 
-        let tmp = format!("{:06o}\x00", checksum_header(test));
+        let tmp = format!("{:06o}\x00", test.calc_checksum());
         new[..tmp.len()].copy_from_slice(tmp.as_bytes());
 
         self.header_checksum == new
+    }
+
+    pub fn calc_checksum(self) -> usize {
+        let out = self.to_bytes().unwrap();
+        let mut checksum = 0;
+        for i in out {
+            checksum += i as usize;
+        }
+        checksum
     }
 }
 
@@ -300,18 +309,19 @@ impl TarFile {
     }
 }
 
+/* TODO: Add other file types */
 fn get_file_type(file_type: &dyn FileTypeExt, meta: &Metadata) -> [u8; 1] {
     if file_type.is_fifo() {
-        return [0x36];
+        return [FileType::FIFO as u8];
     } else if file_type.is_char_device() {
-        return [0x33];
+        return [FileType::Char as u8];
     } else if file_type.is_block_device() {
-        return [0x34];
+        return [FileType::Block as u8];
     } else if meta.is_dir() {
-        return [0x35];
+        return [FileType::Dir as u8];
     }
     /* Normal file meta.is_file() */
-    [0x30]
+    [FileType::Normal as u8]
 }
 
 //Incomplete
@@ -360,19 +370,10 @@ fn generate_header(filename: &String) -> TarHeader {
     head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
     */
 
-    let checksum = format!("{:06o}\x00", checksum_header(head));
+    let checksum = format!("{:06o}\x00", head.calc_checksum());
     head.header_checksum[..checksum.len()].copy_from_slice(checksum.as_bytes());
 
     head
-}
-
-fn checksum_header(tar: TarHeader) -> u64 {
-    let out = tar.to_bytes().unwrap();
-    let mut checksum: u64 = 0;
-    for i in out {
-        checksum += i as u64;
-    }
-    checksum
 }
 
 fn oct_to_dec(input: &[u8]) -> usize {
