@@ -123,13 +123,15 @@ pub struct TarNode {
 
 impl TarNode {
     /// Write out a single file within the tar to a file or something with a ``std::io::Write`` trait.
-    pub fn write<T: std::io::Write>(self, mut input: T) -> Result<(), Error> {
+    pub fn write<T: std::io::Write>(self, mut input: T) -> Result<usize, Error> {
         input.write_all(&self.header.to_bytes().unwrap())?;
+        let mut written = 512;
         for d in self.data {
             input.write_all(&d)?;
+            written += d.len();
         }
 
-        Ok(())
+        Ok(written)
     }
 
     /// Read a TarNode in from a file or something with a ``std::io::Read`` trait.
@@ -216,15 +218,19 @@ impl TarFile {
     /// let out = File::create("test/2.tar".to_string()).unwrap();
     /// data.write(&out).unwrap();
     /// ```
-    pub fn write<T: std::io::Write + Copy>(self, mut input: T) -> Result<(), Error> {
-        for f in self.file {
-            f.write(input)?;
+    pub fn write<T: std::io::Write + Copy>(self, mut input: T) -> Result<usize, Error> {
+        let mut written = 0;
+        for f in self.file.clone() {
+            written += f.write(input)?;
         }
 
         /* Complete the write with 18 blocks of 512 ``0x00`` bytes per the specification */
-        input.write_all(&[0; 9216])?;
+        if !self.file.is_empty() {
+            input.write_all(&[0; 9216])?;
+            written += 9216;
+        }
 
-        Ok(())
+        Ok(written)
     }
 
     /// Create a new `TarFile` struct and initialize it with a `filename` file. This will read in the file to
@@ -280,6 +286,17 @@ impl TarFile {
         }
 
         Ok(out)
+    }
+
+    pub fn remove(&mut self, filename: String) -> Result<bool, Error> {
+        let mut name = [0u8; 100];
+        name[..filename.len()].copy_from_slice(filename.as_bytes());
+        if let Some(i) = &self.file.iter().position(|x| x.header.file_name == name) {
+            self.file.remove(*i);
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 }
 

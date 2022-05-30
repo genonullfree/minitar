@@ -31,3 +31,30 @@ fn open_and_write_tar_file() {
     let out = File::create("test/5.tar".to_string()).unwrap();
     data.write(&out).unwrap();
 }
+
+#[test]
+fn append_remove_tar_file() {
+    let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
+    data.append("test/1.txt".to_string()).unwrap();
+    data.remove("1.txt".to_string()).unwrap();
+    let out = File::create("test/6.tar".to_string()).unwrap();
+    data.write(&out).unwrap();
+}
+
+#[test]
+fn append_remove_remove_tar_file() {
+    let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
+    data.append("test/1.txt".to_string()).unwrap();
+    if data.remove("1.txt".to_string()).unwrap() {
+        if data.remove("1.txt".to_string()).unwrap() {
+            if data.remove("1.txt".to_string()).unwrap() {
+                panic!("This should never happen");
+            }
+        }
+    }
+    let out = File::create("test/99.tar".to_string()).unwrap();
+    if data.write(&out).unwrap() != 0 {
+        panic!("Should be 0 bytes written");
+    }
+    std::fs::remove_file("test/99.tar".to_string()).unwrap();
+}
