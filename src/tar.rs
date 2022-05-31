@@ -336,25 +336,31 @@ impl TarFile {
 }
 
 /* TODO: Add other file types */
-fn get_file_type(file_type: &dyn FileTypeExt, meta: &Metadata) -> [u8; 1] {
-    if file_type.is_fifo() {
-        return [FileType::FIFO as u8];
-    } else if file_type.is_char_device() {
-        return [FileType::Char as u8];
-    } else if file_type.is_block_device() {
-        return [FileType::Block as u8];
-    } else if meta.is_dir() {
-        return [FileType::Dir as u8];
+fn get_file_type(meta: &Metadata) -> u8 {
+    if meta.is_dir() {
+        return FileType::Dir as u8;
     }
-    /* Normal file meta.is_file() */
-    [FileType::Normal as u8]
+
+    let file_type = meta.file_type();
+    if file_type.is_fifo() {
+        return FileType::FIFO as u8;
+    } else if file_type.is_char_device() {
+        return FileType::Char as u8;
+    } else if file_type.is_block_device() {
+        return FileType::Block as u8;
+    } else if file_type.is_symlink() {
+        return FileType::Sym as u8;
+    } else if file_type.is_file() {
+        return FileType::Normal as u8;
+    }
+
+    FileType::Unknown as u8
 }
 
 //Incomplete
 fn generate_header(filename: &String) -> TarHeader {
     let mut head = TarHeader::default();
-    let meta = fs::metadata(&filename).expect("Failed to get file metadata");
-    let file_type = meta.file_type();
+    let meta = fs::symlink_metadata(&filename).expect("Failed to get file metadata");
 
     /* Fill in metadata */
     head.file_name[..filename.len()].copy_from_slice(filename.as_bytes());
@@ -370,7 +376,7 @@ fn generate_header(filename: &String) -> TarHeader {
     head.mod_time[..mtime.len()].copy_from_slice(mtime.as_bytes());
     let checksum: [u8; 8] = [0x20; 8];
     head.header_checksum.copy_from_slice(&checksum);
-    head.link_indicator = get_file_type(&file_type, &meta);
+    head.link_indicator[0] = get_file_type(&meta);
     /* Get link_name via fs::symlink_metadata */
     // let link_name ...default '' ...fs::symlink_metadata
     let magic: [u8; 6] = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
