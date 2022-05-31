@@ -1,30 +1,36 @@
-#![allow(non_camel_case_types)]
-
 use std::env;
-use std::fs::File;
-use std::str;
-use std::io::Read;
-use std::io::Write;
 use std::fs;
+use std::fs::File;
 use std::fs::Metadata;
-use std::os::linux::fs::MetadataExt;
+use std::io::{Error, ErrorKind};
 use std::os::unix::prelude::FileTypeExt;
+use std::str;
 use std::string::String;
 
+use deku::prelude::*;
+
+#[cfg(target_os = "linux")]
+use std::os::linux::fs::MetadataExt;
+#[cfg(target_os = "macos")]
+use std::os::macos::fs::MetadataExt;
+
+/// Represents the different types of files that can be encoded in a tar file.
 #[repr(u8)]
-pub enum type_flag {
+pub enum FileType {
     Normal = 0x30,
     Hard = 0x31,
-    Symbolic = 0x32,
-    Character = 0x33,
+    Sym = 0x32,
+    Char = 0x33,
     Block = 0x34,
-    Directory = 0x35,
+    Dir = 0x35,
     FIFO = 0x36,
     Unknown = 0x00,
 }
 
-#[derive(Clone)]
-pub struct tar_header {
+/// Contains the representation of a Tar file header.
+#[derive(Clone, Copy, Debug, DekuRead, DekuWrite, PartialEq)]
+#[deku(endian = "little")]
+pub struct TarHeader {
     file_name: [u8; 100],
     file_mode: [u8; 8],
     own_user: [u8; 8],
@@ -44,9 +50,9 @@ pub struct tar_header {
     reserved: [u8; 12],
 }
 
-impl Default for tar_header {
-    fn default() -> tar_header {
-        tar_header {
+impl Default for TarHeader {
+    fn default() -> TarHeader {
+        TarHeader {
             file_name: [0; 100],
             file_mode: [0; 8],
             own_user: [0; 8],
@@ -68,106 +74,305 @@ impl Default for tar_header {
     }
 }
 
-#[derive(Clone)]
-pub struct tar_node {
-    header: tar_header,
+impl TarHeader {
+    /// Validates that the magic value received matches the magic value required in the Tar specification.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarHeader;
+    /// let header = TarHeader::default();
+    /// if !header.validate_magic() {
+    ///     println!("Magic value is invalid");
+    /// }
+    /// ```
+    pub fn validate_magic(self) -> bool {
+        self.ustar_magic == "ustar ".as_bytes()
+    }
+
+    /// Validates the header checksum computes to the expected value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarHeader;
+    /// let header = TarHeader::default();
+    /// if header.validate_checksum() {
+    ///     println!("Checksum is valid");
+    /// }
+    /// ```
+    pub fn validate_checksum(self) -> bool {
+        let mut test = self;
+        let mut new = [0x20u8; 8];
+        test.header_checksum.copy_from_slice(&[0x20; 8]);
+
+        let tmp = format!("{:06o}\x00", test.calc_checksum());
+        new[..tmp.len()].copy_from_slice(tmp.as_bytes());
+
+        self.header_checksum == new
+    }
+
+    /// Updates the header checksum value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarHeader;
+    /// let mut header = TarHeader::default();
+    ///
+    /// /* Fill in header information */
+    ///
+    /// header.update_checksum();
+    /// ```
+    pub fn update_checksum(&mut self) {
+        let checksum = format!("{:06o}\x00", self.calc_checksum());
+        self.header_checksum[..checksum.len()].copy_from_slice(checksum.as_bytes());
+    }
+
+    fn calc_checksum(self) -> usize {
+        let out = self.to_bytes().unwrap();
+        let mut checksum = 0;
+        for i in out {
+            checksum += i as usize;
+        }
+        checksum
+    }
+}
+
+/// Contains a tar representation of a file.
+#[derive(Clone, Debug, Default)]
+pub struct TarNode {
+    header: TarHeader,
     data: Vec<[u8; 512]>,
 }
 
-impl Default for tar_node {
-    fn default() -> tar_node {
-        tar_node {
-            header: tar_header::default(),
-            data: Vec::<[u8; 512]>::new(),
+impl TarNode {
+    /// Write out a single file within the tar to a file or something with a ``std::io::Write`` trait.
+    pub fn write<T: std::io::Write>(self, mut input: T) -> Result<usize, Error> {
+        input.write_all(&self.header.to_bytes().unwrap())?;
+        let mut written = 512;
+        for d in self.data {
+            input.write_all(&d)?;
+            written += d.len();
         }
+
+        Ok(written)
     }
-}
 
-//Incomplete
-//pub fn tar_append(filename: File, tar: &mut Vec<tar_node>) {}
+    /// Read a TarNode in from a file or something with a ``std::io::Read`` trait.
+    pub fn read<T: std::io::Read>(mut input: T) -> Result<TarNode, Error> {
+        let mut h = vec![0u8; 512];
+        input.read_exact(&mut h)?;
 
-//Incomplete
-pub fn file_read(filename: String) -> Vec<tar_node> {
-    /* TODO: Use for opening regular files */
-    let mut file = File::open(&filename).expect("Could not open file");
-    let mut tar = Vec::<tar_node>::new();
+        let (_, header) = TarHeader::from_bytes((&h, 0)).unwrap();
+        if header == TarHeader::default() {
+            return Err(Error::new(ErrorKind::InvalidData, "End of tar"));
+        }
+        if !header.validate_magic() {
+            return Err(Error::new(ErrorKind::InvalidData, "Invalid magic"));
+        }
+        if !header.validate_checksum() {
+            return Err(Error::new(ErrorKind::InvalidData, "Invalid checksum"));
+        }
 
-    tar.push(tar_node {
-        header: generate_header(&filename),
-        data: read_file(&mut file),
-    });
+        let chunks = (oct_to_dec(&header.file_size) / 512) + 1;
+        Ok(TarNode {
+            header,
+            data: TarNode::chunk_file(&mut input, Some(chunks))?,
+        })
+    }
 
-    tar
-}
-
-pub fn tar_read(filename: String) -> Vec<tar_node> {
-    /* Open and ingest a tar file for processing */
-    let mut file = File::open(filename).expect("Could not open file");
-
-    let out = ingest(&mut file);
-
-    out
-}
-
-pub fn tar_write(filename: String, tar: &mut Vec<tar_node>) {
-    /* Append the end 0x00 bytes for the file footer */
-    append_end(tar);
-
-    /* Serialize the tar data */
-    let flat = serialize(&tar);
-
-    /* Create and write the tar data to file */
-    let mut file = File::create(filename).expect("Error creating file");
-    file.write_all(&flat).expect("Error writing file");
-    file.flush().expect("Error flushing file");
-}
-
-//Incomplete
-fn ingest(filename: &mut File) -> Vec<tar_node> {
-    /* TODO: While (read_tar_header), get next file */
-    let mut tar = Vec::<tar_node>::new();
-    match read_tar_header(filename) {
-        Some(n) => {
-            let o = oct_to_dec(&n.file_size);
-            tar.push(tar_node {
-                header: n,
-                data: extract_file(filename, o),
+    /// Open and read a file from the ``filename`` argument to a TarNode.
+    fn read_file_to_tar(filename: String) -> Result<TarNode, Error> {
+        let header = generate_header(&filename);
+        if header.link_indicator[0] != FileType::Normal as u8 {
+            return Ok(TarNode {
+                header,
+                data: Vec::<[u8; 512]>::new(),
             });
         }
-        _ => {}
-    };
-    tar
-}
 
-fn validate_magic(header: &tar_header) -> bool {
-    /* Validate magic header value with magic value */
-    let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
-    header.ustar_magic == magic
-}
-
-fn get_file_type(file_type: &dyn FileTypeExt, meta: &Metadata) -> [u8; 1] {
-    if file_type.is_fifo() {
-        return [0x36];
-    } else if file_type.is_char_device() {
-        return [0x33];
-    } else if file_type.is_block_device() {
-        return [0x34];
-    } else if meta.is_dir() {
-        return [0x35];
+        let mut file = File::open(&filename)?;
+        Ok(TarNode {
+            header,
+            data: TarNode::chunk_file(&mut file, None)?,
+        })
     }
-    /* Normal file meta.is_file() */
-    return [0x30];
+
+    /// Read in and split a file into ``512`` byte chunks.
+    fn chunk_file<T: std::io::Read>(
+        file: &mut T,
+        max_chunks: Option<usize>,
+    ) -> Result<Vec<[u8; 512]>, Error> {
+        /* Extract the file data from the tar file */
+        let mut out = Vec::<[u8; 512]>::new();
+        let mut n = if let Some(max) = max_chunks {
+            max
+        } else {
+            usize::MAX
+        };
+
+        loop {
+            /* Carve out 512 bytes at a time */
+            let mut buf: [u8; 512] = [0; 512];
+            let len = file.read(&mut buf).expect("Failed to read");
+
+            n -= 1;
+
+            /* If read len == 0, we've hit the EOF */
+            if len == 0 || n == 0 {
+                break;
+            }
+
+            /* Save this chunk */
+            out.push(buf);
+        }
+        Ok(out)
+    }
 }
 
-//Incomplete
-fn generate_header(filename: &String) -> tar_header {
-    let mut head = tar_header::default();
-    let meta = fs::metadata(&filename).expect("Failed to get file metadata");
+/// Contains the vector of files that represent a tar file.
+#[derive(Clone, Debug, Default)]
+pub struct TarFile {
+    file: Vec<TarNode>,
+}
+
+impl TarFile {
+    /// Write out a vector of `TarNodes` to a file or something that implements ``std::io::Write`` and ``std::io::Copy``.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::fs::File;
+    /// use minitar::tar::TarFile;
+    ///
+    /// let data = TarFile::new("test/1.txt".to_string()).unwrap();
+    ///
+    /// let out = File::create("test/2.tar".to_string()).unwrap();
+    /// data.write(&out).unwrap();
+    /// ```
+    pub fn write<T: std::io::Write + Copy>(self, mut input: T) -> Result<usize, Error> {
+        let mut written = 0;
+        for f in self.file.clone() {
+            written += f.write(input)?;
+        }
+
+        /* Complete the write with 18 blocks of 512 ``0x00`` bytes per the specification */
+        if !self.file.is_empty() {
+            input.write_all(&[0; 9216])?;
+            written += 9216;
+        }
+
+        Ok(written)
+    }
+
+    /// Create a new `TarFile` struct and initialize it with a `filename` file. This will read in the file to
+    /// the `TarFile` struct as a `TarNode`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarFile;
+    ///
+    /// let data = TarFile::new("test/1.txt".to_string()).unwrap();
+    /// ```
+    pub fn new(filename: String) -> Result<Self, Error> {
+        Ok(TarFile {
+            file: vec![TarNode::read_file_to_tar(filename)?],
+        })
+    }
+
+    /// Append another file to the `TarFile.file` vector. This adds a file to the internal representation of the tar file.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarFile;
+    ///
+    /// let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
+    /// data.append("test/1.txt".to_string()).unwrap();
+    /// ```
+    pub fn append(&mut self, filename: String) -> Result<(), Error> {
+        self.file.push(TarNode::read_file_to_tar(filename).unwrap());
+
+        Ok(())
+    }
+
+    /// Open and load an external tar file into the internal `TarFile` struct. This parses and loads up all the files
+    /// contained within the external tar file.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarFile;
+    ///
+    /// TarFile::open("test/1.tar".to_string()).unwrap();
+    /// ```
+    pub fn open(filename: String) -> Result<Self, Error> {
+        let file = File::open(&filename).unwrap();
+        let mut out = TarFile {
+            file: Vec::<TarNode>::new(),
+        };
+
+        while let Ok(t) = TarNode::read(&file) {
+            out.file.push(t);
+        }
+
+        Ok(out)
+    }
+
+    /// Remove the first file from the Tar that matches the filename and path.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarFile;
+    ///
+    /// let mut data = TarFile::new("test/1.tar".to_string()).unwrap();
+    /// data.remove("test/1.tar".to_string()).unwrap();
+    /// ```
+    pub fn remove(&mut self, filename: String) -> Result<bool, Error> {
+        let mut name = [0u8; 100];
+        name[..filename.len()].copy_from_slice(filename.as_bytes());
+        if let Some(i) = &self.file.iter().position(|x| x.header.file_name == name) {
+            self.file.remove(*i);
+            return Ok(true);
+        }
+
+        Ok(false)
+    }
+}
+
+fn get_file_type(meta: &Metadata) -> u8 {
+    if meta.is_dir() {
+        return FileType::Dir as u8;
+    }
+
     let file_type = meta.file_type();
+    if file_type.is_fifo() {
+        return FileType::FIFO as u8;
+    } else if file_type.is_char_device() {
+        return FileType::Char as u8;
+    } else if file_type.is_block_device() {
+        return FileType::Block as u8;
+    } else if file_type.is_fifo() {
+        return FileType::FIFO as u8;
+    } else if file_type.is_symlink() {
+        return FileType::Sym as u8;
+    } else if file_type.is_file() {
+        return FileType::Normal as u8;
+    }
+
+    FileType::Unknown as u8
+}
+
+fn generate_header(filename: &String) -> TarHeader {
+    let mut head = TarHeader::default();
+    let meta = fs::symlink_metadata(&filename).expect("Failed to get file metadata");
 
     /* Fill in metadata */
-    head.file_name[..filename.len()].copy_from_slice(&filename.as_bytes());
-    let mode = format!("{:07o}", meta.st_mode());
+    head.file_name[..filename.len()].copy_from_slice(filename.as_bytes());
+    let mode = format!("{:07o}", (meta.st_mode() & 0o777));
     head.file_mode[..mode.len()].copy_from_slice(mode.as_bytes());
     let user = format!("{:07o}", meta.st_uid());
     head.own_user[..user.len()].copy_from_slice(user.as_bytes());
@@ -177,173 +382,48 @@ fn generate_header(filename: &String) -> tar_header {
     head.file_size[..size.len()].copy_from_slice(size.as_bytes());
     let mtime = format!("{:011o}", meta.st_mtime());
     head.mod_time[..mtime.len()].copy_from_slice(mtime.as_bytes());
-    let checksum: [u8; 8] = [0x20; 8];
-    head.header_checksum.copy_from_slice(&checksum);
-    head.link_indicator = get_file_type(&file_type, &meta);
-    /* Get link_name via fs::symlink_metadata */
-    // let link_name ...default '' ...fs::symlink_metadata
-    let magic: [u8; 6] = [ 0x75, 0x73, 0x74, 0x61, 0x72, 0x20 ];
-    head.ustar_magic[..magic.len()].copy_from_slice(&magic);
-    let version: [u8; 2] = [ 0x20, 0x00 ];
-    head.ustar_version[..version.len()].copy_from_slice(&version);
+
+    /* Get the file type and conditional metadata */
+    head.link_indicator[0] = get_file_type(&meta);
+    if head.link_indicator[0] == FileType::Sym as u8 {
+        let link = fs::read_link(&filename)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        head.link_name[..link.len()].copy_from_slice(link.as_bytes());
+    } else if head.link_indicator[0] == FileType::Block as u8 {
+        let major = format!("{:07o}", meta.st_dev());
+        head.device_major[..major.len()].copy_from_slice(major.as_bytes());
+        let minor = format!("{:07o}", meta.st_rdev());
+        head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
+    }
+
     /* TODO: Find better way to get username */
     let key = "USER";
-    match env::var(key) {
-        Ok(val) => head.own_user_name[..val.len()].copy_from_slice(&val.as_bytes()),
-        _ => {},
+    if let Ok(val) = env::var(key) {
+        head.own_user_name[..val.len()].copy_from_slice(val.as_bytes())
     }
     /* TODO: Find way to get groupname */
-    /* TODO: Get major and minor device numbers when applicable
-    let major = format!("{:07o}", meta.st_dev());
-    head.device_major[..major.len()].copy_from_slice(major.as_bytes());
-    let minor = format!("{:07o}", meta.st_rdev());
-    head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
-    */
 
-    let checksum = format!("{:06}\x00", checksum_header(head.clone()));
-    head.header_checksum[..checksum.len()].copy_from_slice(&checksum.as_bytes());
+    /* Set USTAR magic and version info */
+    head.ustar_magic = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
+    head.ustar_version = [0x20, 0x00];
+    head.header_checksum = [0x20; 8];
+
+    /* Update the header checksum value */
+    head.update_checksum();
 
     head
 }
 
-fn read_tar_header(filename: &mut File) -> Option<tar_header> {
-    /* Create a new tar_header struct and read in the values */
-    let mut header: tar_header = tar_header::default();
-    filename.read_exact(&mut header.file_name).expect("Error reading file_name");
-    filename.read_exact(&mut header.file_mode).expect("Error reading file_mode");
-    filename.read_exact(&mut header.own_user).expect("Error reading own_user");
-    filename.read_exact(&mut header.own_group).expect("Error reading own_group");
-    filename.read_exact(&mut header.file_size).expect("Error reading file_size");
-    filename.read_exact(&mut header.mod_time).expect("Error reading mod_time");
-    filename.read_exact(&mut header.header_checksum).expect("Error reading header_checksum");
-    filename.read_exact(&mut header.link_indicator).expect("Error reading link_indicator");
-    filename.read_exact(&mut header.link_name).expect("Error reading link_name");
-    filename.read_exact(&mut header.ustar_magic).expect("Error reading ustar_magic");
-    filename.read_exact(&mut header.ustar_version).expect("Error reading ustar_version");
-    filename.read_exact(&mut header.own_user_name).expect("Error reading own_user_name");
-    filename.read_exact(&mut header.own_group_name).expect("Error reading own_group_name");
-    filename.read_exact(&mut header.device_major).expect("Error reading device_major");
-    filename.read_exact(&mut header.device_minor).expect("Error reading device_minor");
-    filename.read_exact(&mut header.file_prefix).expect("Error reading file_prefix");
-    filename.read_exact(&mut header.reserved).expect("Error reading reserved");
-
-    /* Validate the header magic value */
-    if validate_magic(&header) {
-        return Some(header);
-    }
-
-    None
-}
-
-fn read_file<T: std::io::Read>(file: &mut T) -> Vec<[u8; 512]> {
-    /* Extract the file data from the tar file */
-    let mut out = Vec::<[u8; 512]>::new();
-
-    loop {
-        /* Carve out 512 bytes at a time */
-        let mut buf: [u8; 512] = [0; 512];
-        let len = file.read(&mut buf).expect("Failed to read");
-
-        /* If read len == 0, we've hit the EOF */
-        if len == 0 {
-            break;
-        }
-
-        /* Save this chunk */
-        out.push(buf);
-    }
-    out
-}
-
-fn extract_file<T: std::io::Read>(file: &mut T, file_size: usize) -> Vec<[u8; 512]> {
-    /* Extract the file data from the tar file */
-    let mut out = Vec::<[u8; 512]>::new();
-    let mut size = 0;
-    loop {
-        /* Carve out 512 bytes at a time */
-        let mut buf: [u8; 512] = [0; 512];
-        let len = file.read(&mut buf).expect("Failed to read");
-
-        /* If read len == 0, we've hit the EOF */
-        if len == 0 {
-            break;
-        }
-
-        /* Save this chunk */
-        out.push(buf);
-        size += len;
-
-        /* If we've hit the requested file size, end now */
-        if size >= file_size {
-            break;
-        }
-    }
-    out
-}
-
-fn checksum_header(tar: tar_header) -> u64 {
-    let mut node = Vec::<tar_node>::new();
-    node.push(tar_node {
-        header: tar,
-        data: Vec::<[u8; 512]>::new()
-    });
-    let out = serialize(&node);
-    let mut checksum: u64 = 0;
-    for i in &out[..512] {
-        checksum += *i as u64;
-    }
-    checksum
-}
-
-fn serialize(tar: &Vec<tar_node>) -> Vec<u8> {
-    /* Serialize the header and data for writing */
-    let mut out = Vec::<u8>::new();
-    /* Iterate through each header value */
-    for node in tar {
-        out.extend_from_slice(&node.header.file_name);
-        out.extend_from_slice(&node.header.file_mode);
-        out.extend_from_slice(&node.header.own_user);
-        out.extend_from_slice(&node.header.own_group);
-        out.extend_from_slice(&node.header.file_size);
-        out.extend_from_slice(&node.header.mod_time);
-        out.extend_from_slice(&node.header.header_checksum);
-        out.extend_from_slice(&node.header.link_indicator);
-        out.extend_from_slice(&node.header.link_name);
-        out.extend_from_slice(&node.header.ustar_magic);
-        out.extend_from_slice(&node.header.ustar_version);
-        out.extend_from_slice(&node.header.own_user_name);
-        out.extend_from_slice(&node.header.own_group_name);
-        out.extend_from_slice(&node.header.device_major);
-        out.extend_from_slice(&node.header.device_minor);
-        out.extend_from_slice(&node.header.file_prefix);
-        out.extend_from_slice(&node.header.reserved);
-        /* Iterate through each data chunk */
-        for d in &node.data {
-            out.extend_from_slice(d);
-        }
-    }
-    out
-}
-
-fn append_end(tar: &mut Vec<tar_node>) {
-    /* Append the empty blocks of 0x00's at the end */
-    let mut node = tar_node::default();
-    let mut i = 0;
-    loop {
-        node.data.push([0; 512]);
-        i += 1;
-        if i > 16 {
-            break;
-        }
-    }
-    tar.push(node);
-}
-
 fn oct_to_dec(input: &[u8]) -> usize {
     /* Convert the &[u8] to string and remove the null byte */
-    let mut s = str::from_utf8(&input).expect("Cannot convert utf8").to_string();
+    let mut s = str::from_utf8(input)
+        .expect("Cannot convert utf8")
+        .to_string();
     s.pop();
 
     /* Convert to usize from octal */
-    usize::from_str_radix(&s, 8).expect("Cannot convert oct to decimal")
+    usize::from_str_radix(&s, 8).unwrap_or_else(|_| panic!("Cannot convert oct to decimal: {}", &s))
 }

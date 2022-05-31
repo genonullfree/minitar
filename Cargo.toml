@@ -1,6 +1,6 @@
 [package]
 name = "minitar"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["geno nullfree <nullfree.geno@gmail.com> <nullfree.geno@gmail.com>"]
 edition = "2018"
 description = "A minimal implementation of the tape archive (tar) format in rust."
@@ -12,3 +12,4 @@ repository = "https://github.com/genonullfree/minitar"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+deku = "0.13"
