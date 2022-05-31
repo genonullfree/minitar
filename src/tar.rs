@@ -366,7 +366,6 @@ fn get_file_type(meta: &Metadata) -> u8 {
     FileType::Unknown as u8
 }
 
-//Incomplete
 fn generate_header(filename: &String) -> TarHeader {
     let mut head = TarHeader::default();
     let meta = fs::symlink_metadata(&filename).expect("Failed to get file metadata");
@@ -383,38 +382,36 @@ fn generate_header(filename: &String) -> TarHeader {
     head.file_size[..size.len()].copy_from_slice(size.as_bytes());
     let mtime = format!("{:011o}", meta.st_mtime());
     head.mod_time[..mtime.len()].copy_from_slice(mtime.as_bytes());
-    let checksum: [u8; 8] = [0x20; 8];
-    head.header_checksum.copy_from_slice(&checksum);
+
+    /* Get the file type and conditional metadata */
     head.link_indicator[0] = get_file_type(&meta);
-    /* Get link_name via fs::symlink_metadata */
     if head.link_indicator[0] == FileType::Sym as u8 {
         let link = fs::read_link(&filename)
-            .unwrap()
-            .file_name()
             .unwrap()
             .to_str()
             .unwrap()
             .to_string();
         head.link_name[..link.len()].copy_from_slice(link.as_bytes());
+    } else if head.link_indicator[0] == FileType::Block as u8 {
+        let major = format!("{:07o}", meta.st_dev());
+        head.device_major[..major.len()].copy_from_slice(major.as_bytes());
+        let minor = format!("{:07o}", meta.st_rdev());
+        head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
     }
-    // let link_name ...default '' ...fs::symlink_metadata
-    let magic: [u8; 6] = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
-    head.ustar_magic[..magic.len()].copy_from_slice(&magic);
-    let version: [u8; 2] = [0x20, 0x00];
-    head.ustar_version[..version.len()].copy_from_slice(&version);
+
     /* TODO: Find better way to get username */
     let key = "USER";
     if let Ok(val) = env::var(key) {
         head.own_user_name[..val.len()].copy_from_slice(val.as_bytes())
     }
     /* TODO: Find way to get groupname */
-    /* TODO: Get major and minor device numbers when applicable
-    let major = format!("{:07o}", meta.st_dev());
-    head.device_major[..major.len()].copy_from_slice(major.as_bytes());
-    let minor = format!("{:07o}", meta.st_rdev());
-    head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
-    */
 
+    /* Set USTAR magic and version info */
+    head.ustar_magic = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
+    head.ustar_version = [0x20, 0x00];
+    head.header_checksum = [0x20; 8];
+
+    /* Update the header checksum value */
     head.update_checksum();
 
     head
