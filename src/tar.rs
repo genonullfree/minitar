@@ -113,7 +113,24 @@ impl TarHeader {
         self.header_checksum == new
     }
 
-    pub fn calc_checksum(self) -> usize {
+    /// Updates the header checksum value.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarHeader;
+    /// let mut header = TarHeader::default();
+    ///
+    /// /* Fill in header information */
+    ///
+    /// header.update_checksum();
+    /// ```
+    pub fn update_checksum(&mut self) {
+        let checksum = format!("{:06o}\x00", self.calc_checksum());
+        self.header_checksum[..checksum.len()].copy_from_slice(checksum.as_bytes());
+    }
+
+    fn calc_checksum(self) -> usize {
         let out = self.to_bytes().unwrap();
         let mut checksum = 0;
         for i in out {
@@ -370,8 +387,7 @@ fn generate_header(filename: &String) -> TarHeader {
     head.device_minor[..minor.len()].copy_from_slice(minor.as_bytes());
     */
 
-    let checksum = format!("{:06o}\x00", head.calc_checksum());
-    head.header_checksum[..checksum.len()].copy_from_slice(checksum.as_bytes());
+    head.update_checksum();
 
     head
 }
