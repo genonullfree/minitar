@@ -313,6 +313,16 @@ impl TarFile {
         Ok(out)
     }
 
+    /// Remove the first file from the Tar that matches the filename and path.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use minitar::tar::TarFile;
+    ///
+    /// let mut data = TarFile::new("test/1.tar".to_string()).unwrap();
+    /// data.remove("test/1.tar".to_string()).unwrap();
+    /// ```
     pub fn remove(&mut self, filename: String) -> Result<bool, Error> {
         let mut name = [0u8; 100];
         name[..filename.len()].copy_from_slice(filename.as_bytes());
