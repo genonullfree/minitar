@@ -45,9 +45,9 @@ fn append_remove_tar_file() {
 fn append_remove_remove_tar_file() {
     let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
     data.append("test/1.txt".to_string()).unwrap();
-    if data.remove("1.txt".to_string()).unwrap() {
-        if data.remove("1.txt".to_string()).unwrap() {
-            if data.remove("1.txt".to_string()).unwrap() {
+    if data.remove("test/1.txt".to_string()).unwrap() {
+        if data.remove("test/1.txt".to_string()).unwrap() {
+            if data.remove("test/1.txt".to_string()).unwrap() {
                 panic!("This should never happen");
             }
         }

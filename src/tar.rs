@@ -4,7 +4,6 @@ use std::fs::File;
 use std::fs::Metadata;
 use std::io::{Error, ErrorKind};
 use std::os::unix::prelude::FileTypeExt;
-use std::path::Path;
 use std::str;
 use std::string::String;
 
@@ -28,7 +27,7 @@ pub enum FileType {
     Unknown = 0x00,
 }
 
-/// Encompases all the data that is contained within a Tar File Header.
+/// Contains the representation of a Tar file header.
 #[derive(Clone, Copy, DekuRead, DekuWrite, PartialEq)]
 #[deku(endian = "little")]
 pub struct TarHeader {
@@ -346,15 +345,9 @@ fn generate_header(filename: &String) -> TarHeader {
     let mut head = TarHeader::default();
     let meta = fs::metadata(&filename).expect("Failed to get file metadata");
     let file_type = meta.file_type();
-    let name = Path::new(&filename)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
 
     /* Fill in metadata */
-    head.file_name[..name.len()].copy_from_slice(name.as_bytes());
+    head.file_name[..filename.len()].copy_from_slice(filename.as_bytes());
     let mode = format!("{:07o}", (meta.st_mode() & 0o777));
     head.file_mode[..mode.len()].copy_from_slice(mode.as_bytes());
     let user = format!("{:07o}", meta.st_uid());
