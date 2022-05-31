@@ -28,7 +28,7 @@ pub enum FileType {
 }
 
 /// Contains the representation of a Tar file header.
-#[derive(Clone, Copy, DekuRead, DekuWrite, PartialEq)]
+#[derive(Clone, Copy, Debug, DekuRead, DekuWrite, PartialEq)]
 #[deku(endian = "little")]
 pub struct TarHeader {
     file_name: [u8; 100],
@@ -140,7 +140,7 @@ impl TarHeader {
 }
 
 /// Contains a tar representation of a file.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TarNode {
     header: TarHeader,
     data: Vec<[u8; 512]>,
@@ -184,9 +184,17 @@ impl TarNode {
 
     /// Open and read a file from the ``filename`` argument to a TarNode.
     fn read_file_to_tar(filename: String) -> Result<TarNode, Error> {
+        let header = generate_header(&filename);
+        if header.link_indicator[0] != FileType::Normal as u8 {
+            return Ok(TarNode {
+                header,
+                data: Vec::<[u8; 512]>::new(),
+            });
+        }
+
         let mut file = File::open(&filename)?;
         Ok(TarNode {
-            header: generate_header(&filename),
+            header,
             data: TarNode::chunk_file(&mut file, None)?,
         })
     }
@@ -224,7 +232,7 @@ impl TarNode {
 }
 
 /// Contains the vector of files that represent a tar file.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct TarFile {
     file: Vec<TarNode>,
 }
@@ -335,7 +343,6 @@ impl TarFile {
     }
 }
 
-/* TODO: Add other file types */
 fn get_file_type(meta: &Metadata) -> u8 {
     if meta.is_dir() {
         return FileType::Dir as u8;
@@ -348,6 +355,8 @@ fn get_file_type(meta: &Metadata) -> u8 {
         return FileType::Char as u8;
     } else if file_type.is_block_device() {
         return FileType::Block as u8;
+    } else if file_type.is_fifo() {
+        return FileType::FIFO as u8;
     } else if file_type.is_symlink() {
         return FileType::Sym as u8;
     } else if file_type.is_file() {
@@ -378,6 +387,16 @@ fn generate_header(filename: &String) -> TarHeader {
     head.header_checksum.copy_from_slice(&checksum);
     head.link_indicator[0] = get_file_type(&meta);
     /* Get link_name via fs::symlink_metadata */
+    if head.link_indicator[0] == FileType::Sym as u8 {
+        let link = fs::read_link(&filename)
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        head.link_name[..link.len()].copy_from_slice(link.as_bytes());
+    }
     // let link_name ...default '' ...fs::symlink_metadata
     let magic: [u8; 6] = [0x75, 0x73, 0x74, 0x61, 0x72, 0x20];
     head.ustar_magic[..magic.len()].copy_from_slice(&magic);

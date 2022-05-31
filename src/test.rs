@@ -18,7 +18,7 @@ fn new_and_write_tar_file() {
 #[test]
 fn new_and_append_tar_file() {
     let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
-    data.append("test/1.txt".to_string()).unwrap();
+    data.append("test/1.lnk".to_string()).unwrap();
 
     let out = File::create("test/5.tar".to_string()).unwrap();
     data.write(&out).unwrap();
