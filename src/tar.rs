@@ -2,12 +2,13 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::fs::Metadata;
-use std::io::{Error, ErrorKind};
 use std::os::unix::prelude::FileTypeExt;
 use std::str;
 use std::string::String;
 
 use deku::prelude::*;
+
+use crate::error::TarError;
 
 #[cfg(target_os = "linux")]
 use std::os::linux::fs::MetadataExt;
@@ -97,19 +98,19 @@ impl TarHeader {
     /// ```
     /// use minitar::tar::TarHeader;
     /// let header = TarHeader::default();
-    /// if header.validate_checksum() {
+    /// if header.validate_checksum().unwrap() {
     ///     println!("Checksum is valid");
     /// }
     /// ```
-    pub fn validate_checksum(self) -> bool {
+    pub fn validate_checksum(self) -> Result<bool, TarError> {
         let mut test = self;
         let mut new = [0x20u8; 8];
         test.header_checksum.copy_from_slice(&[0x20; 8]);
 
-        let tmp = format!("{:06o}\x00", test.calc_checksum());
+        let tmp = format!("{:06o}\x00", test.calc_checksum()?);
         new[..tmp.len()].copy_from_slice(tmp.as_bytes());
 
-        self.header_checksum == new
+        Ok(self.header_checksum == new)
     }
 
     /// Updates the header checksum value.
@@ -124,18 +125,19 @@ impl TarHeader {
     ///
     /// header.update_checksum();
     /// ```
-    pub fn update_checksum(&mut self) {
-        let checksum = format!("{:06o}\x00", self.calc_checksum());
+    pub fn update_checksum(&mut self) -> Result<(), TarError> {
+        let checksum = format!("{:06o}\x00", self.calc_checksum()?);
         self.header_checksum[..checksum.len()].copy_from_slice(checksum.as_bytes());
+        Ok(())
     }
 
-    fn calc_checksum(self) -> usize {
-        let out = self.to_bytes().unwrap();
+    fn calc_checksum(self) -> Result<usize, TarError> {
+        let out = self.to_bytes()?;
         let mut checksum = 0;
         for i in out {
             checksum += i as usize;
         }
-        checksum
+        Ok(checksum)
     }
 }
 
@@ -148,8 +150,8 @@ pub struct TarNode {
 
 impl TarNode {
     /// Write out a single file within the tar to a file or something with a ``std::io::Write`` trait.
-    pub fn write<T: std::io::Write>(self, mut input: T) -> Result<usize, Error> {
-        input.write_all(&self.header.to_bytes().unwrap())?;
+    pub fn write<T: std::io::Write>(self, mut input: T) -> Result<usize, TarError> {
+        input.write_all(&self.header.to_bytes()?)?;
         let mut written = 512;
         for d in self.data {
             input.write_all(&d)?;
@@ -160,22 +162,22 @@ impl TarNode {
     }
 
     /// Read a TarNode in from a file or something with a ``std::io::Read`` trait.
-    pub fn read<T: std::io::Read>(mut input: T) -> Result<TarNode, Error> {
+    pub fn read<T: std::io::Read>(mut input: T) -> Result<TarNode, TarError> {
         let mut h = vec![0u8; 512];
         input.read_exact(&mut h)?;
 
-        let (_, header) = TarHeader::from_bytes((&h, 0)).unwrap();
+        let (_, header) = TarHeader::from_bytes((&h, 0))?;
         if header == TarHeader::default() {
-            return Err(Error::new(ErrorKind::InvalidData, "End of tar"));
+            return Err(TarError::EndOfTar);
         }
         if !header.validate_magic() {
-            return Err(Error::new(ErrorKind::InvalidData, "Invalid magic"));
+            return Err(TarError::InvalidMagic);
         }
-        if !header.validate_checksum() {
-            return Err(Error::new(ErrorKind::InvalidData, "Invalid checksum"));
+        if !header.validate_checksum()? {
+            return Err(TarError::InvalidChecksum);
         }
 
-        let chunks = (oct_to_dec(&header.file_size) / 512) + 1;
+        let chunks = (oct_to_dec(&header.file_size)? / 512) + 1;
         Ok(TarNode {
             header,
             data: TarNode::chunk_file(&mut input, Some(chunks))?,
@@ -183,8 +185,8 @@ impl TarNode {
     }
 
     /// Open and read a file from the ``filename`` argument to a TarNode.
-    fn read_file_to_tar(filename: String) -> Result<TarNode, Error> {
-        let header = generate_header(&filename);
+    fn read_file_to_tar(filename: String) -> Result<TarNode, TarError> {
+        let header = generate_header(&filename)?;
         if header.link_indicator[0] != FileType::Normal as u8 {
             return Ok(TarNode {
                 header,
@@ -203,7 +205,7 @@ impl TarNode {
     fn chunk_file<T: std::io::Read>(
         file: &mut T,
         max_chunks: Option<usize>,
-    ) -> Result<Vec<[u8; 512]>, Error> {
+    ) -> Result<Vec<[u8; 512]>, TarError> {
         /* Extract the file data from the tar file */
         let mut out = Vec::<[u8; 512]>::new();
         let mut n = if let Some(max) = max_chunks {
@@ -215,7 +217,7 @@ impl TarNode {
         loop {
             /* Carve out 512 bytes at a time */
             let mut buf: [u8; 512] = [0; 512];
-            let len = file.read(&mut buf).expect("Failed to read");
+            let len = file.read(&mut buf)?;
 
             n -= 1;
 
@@ -251,7 +253,7 @@ impl TarFile {
     /// let out = File::create("test/2.tar".to_string()).unwrap();
     /// data.write(&out).unwrap();
     /// ```
-    pub fn write<T: std::io::Write + Copy>(self, mut input: T) -> Result<usize, Error> {
+    pub fn write<T: std::io::Write + Copy>(self, mut input: T) -> Result<usize, TarError> {
         let mut written = 0;
         for f in self.file.clone() {
             written += f.write(input)?;
@@ -276,7 +278,7 @@ impl TarFile {
     ///
     /// let data = TarFile::new("test/1.txt".to_string()).unwrap();
     /// ```
-    pub fn new(filename: String) -> Result<Self, Error> {
+    pub fn new(filename: String) -> Result<Self, TarError> {
         Ok(TarFile {
             file: vec![TarNode::read_file_to_tar(filename)?],
         })
@@ -292,8 +294,8 @@ impl TarFile {
     /// let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
     /// data.append("test/1.txt".to_string()).unwrap();
     /// ```
-    pub fn append(&mut self, filename: String) -> Result<(), Error> {
-        self.file.push(TarNode::read_file_to_tar(filename).unwrap());
+    pub fn append(&mut self, filename: String) -> Result<(), TarError> {
+        self.file.push(TarNode::read_file_to_tar(filename)?);
 
         Ok(())
     }
@@ -308,8 +310,8 @@ impl TarFile {
     ///
     /// TarFile::open("test/1.tar".to_string()).unwrap();
     /// ```
-    pub fn open(filename: String) -> Result<Self, Error> {
-        let file = File::open(&filename).unwrap();
+    pub fn open(filename: String) -> Result<Self, TarError> {
+        let file = File::open(&filename)?;
         let mut out = TarFile {
             file: Vec::<TarNode>::new(),
         };
@@ -331,7 +333,7 @@ impl TarFile {
     /// let mut data = TarFile::new("test/1.tar".to_string()).unwrap();
     /// data.remove("test/1.tar".to_string()).unwrap();
     /// ```
-    pub fn remove(&mut self, filename: String) -> Result<bool, Error> {
+    pub fn remove(&mut self, filename: String) -> Result<bool, TarError> {
         let mut name = [0u8; 100];
         name[..filename.len()].copy_from_slice(filename.as_bytes());
         if let Some(i) = &self.file.iter().position(|x| x.header.file_name == name) {
@@ -366,9 +368,9 @@ fn get_file_type(meta: &Metadata) -> u8 {
     FileType::Unknown as u8
 }
 
-fn generate_header(filename: &String) -> TarHeader {
+fn generate_header(filename: &String) -> Result<TarHeader, TarError> {
     let mut head = TarHeader::default();
-    let meta = fs::symlink_metadata(&filename).expect("Failed to get file metadata");
+    let meta = fs::symlink_metadata(&filename)?;
 
     /* Fill in metadata */
     head.file_name[..filename.len()].copy_from_slice(filename.as_bytes());
@@ -386,11 +388,7 @@ fn generate_header(filename: &String) -> TarHeader {
     /* Get the file type and conditional metadata */
     head.link_indicator[0] = get_file_type(&meta);
     if head.link_indicator[0] == FileType::Sym as u8 {
-        let link = fs::read_link(&filename)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
+        let link = fs::read_link(&filename)?.to_str().unwrap().to_string();
         head.link_name[..link.len()].copy_from_slice(link.as_bytes());
     } else if head.link_indicator[0] == FileType::Block as u8 {
         let major = format!("{:07o}", meta.st_dev());
@@ -412,18 +410,16 @@ fn generate_header(filename: &String) -> TarHeader {
     head.header_checksum = [0x20; 8];
 
     /* Update the header checksum value */
-    head.update_checksum();
+    head.update_checksum()?;
 
-    head
+    Ok(head)
 }
 
-fn oct_to_dec(input: &[u8]) -> usize {
+fn oct_to_dec(input: &[u8]) -> Result<usize, TarError> {
     /* Convert the &[u8] to string and remove the null byte */
-    let mut s = str::from_utf8(input)
-        .expect("Cannot convert utf8")
-        .to_string();
+    let mut s = str::from_utf8(input)?.to_string();
     s.pop();
 
     /* Convert to usize from octal */
-    usize::from_str_radix(&s, 8).unwrap_or_else(|_| panic!("Cannot convert oct to decimal: {}", &s))
+    Ok(usize::from_str_radix(&s, 8)?)
 }

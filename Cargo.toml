@@ -13,3 +13,4 @@ repository = "https://github.com/genonullfree/minitar"
 
 [dependencies]
 deku = "0.13"
+thiserror = "1.0.31"
