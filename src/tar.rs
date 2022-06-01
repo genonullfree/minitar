@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::fs::Metadata;
-use std::io::{Error, ErrorKind};
+use std::io::{BufReader, Error, ErrorKind};
 use std::os::unix::prelude::FileTypeExt;
 use std::str;
 use std::string::String;
@@ -193,9 +193,10 @@ impl TarNode {
         }
 
         let mut file = File::open(&filename)?;
+        let mut reader = BufReader::new(file);
         Ok(TarNode {
             header,
-            data: TarNode::chunk_file(&mut file, None)?,
+            data: TarNode::chunk_file(&mut reader, None)?,
         })
     }
 
@@ -310,11 +311,12 @@ impl TarFile {
     /// ```
     pub fn open(filename: String) -> Result<Self, Error> {
         let file = File::open(&filename).unwrap();
+        let mut reader = BufReader::new(file);
         let mut out = TarFile {
             file: Vec::<TarNode>::new(),
         };
 
-        while let Ok(t) = TarNode::read(&file) {
+        while let Ok(t) = TarNode::read(&mut reader) {
             out.file.push(t);
         }
 
