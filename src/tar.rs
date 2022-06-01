@@ -212,9 +212,9 @@ impl TarNode {
             usize::MAX
         };
 
+        /* Carve out 512 bytes at a time */
+        let mut buf: [u8; 512] = [0; 512];
         loop {
-            /* Carve out 512 bytes at a time */
-            let mut buf: [u8; 512] = [0; 512];
             let len = file.read(&mut buf).expect("Failed to read");
 
             n -= 1;
