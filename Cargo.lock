@@ -95,6 +95,7 @@ name = "minitar"
 version = "0.2.0"
 dependencies = [
  "deku",
+ "thiserror",
 ]
 
 [[package]]
