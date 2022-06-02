@@ -2,7 +2,7 @@ use std::env;
 use std::fs;
 use std::fs::File;
 use std::fs::Metadata;
-use std::io::{BufReader, Error, ErrorKind};
+use std::io::BufReader;
 use std::os::unix::prelude::FileTypeExt;
 use std::str;
 use std::string::String;
@@ -195,7 +195,7 @@ impl TarNode {
             });
         }
 
-        let mut file = File::open(&filename)?;
+        let file = File::open(&filename)?;
         let mut reader = BufReader::new(file);
         Ok(TarNode {
             header,
