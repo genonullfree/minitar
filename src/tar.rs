@@ -9,6 +9,8 @@ use std::string::String;
 
 use deku::prelude::*;
 
+use crate::error::FileTypeError;
+use crate::error::LibraryError;
 use crate::error::TarError;
 
 #[cfg(target_os = "linux")]
@@ -186,7 +188,7 @@ impl TarNode {
     }
 
     /// Open and read a file from the ``filename`` argument to a TarNode.
-    fn read_file_to_tar(filename: String) -> Result<TarNode, TarError> {
+    fn read_file_to_tar(filename: String) -> Result<TarNode, LibraryError> {
         let header = generate_header(&filename)?;
         if header.link_indicator[0] != FileType::Normal as u8 {
             return Ok(TarNode {
@@ -280,7 +282,7 @@ impl TarFile {
     ///
     /// let data = TarFile::new("test/1.txt".to_string()).unwrap();
     /// ```
-    pub fn new(filename: String) -> Result<Self, TarError> {
+    pub fn new(filename: String) -> Result<Self, LibraryError> {
         Ok(TarFile {
             file: vec![TarNode::read_file_to_tar(filename)?],
         })
@@ -296,7 +298,7 @@ impl TarFile {
     /// let mut data = TarFile::new("test/1.txt".to_string()).unwrap();
     /// data.append("test/1.txt".to_string()).unwrap();
     /// ```
-    pub fn append(&mut self, filename: String) -> Result<(), TarError> {
+    pub fn append(&mut self, filename: String) -> Result<(), LibraryError> {
         self.file.push(TarNode::read_file_to_tar(filename)?);
 
         Ok(())
@@ -348,30 +350,21 @@ impl TarFile {
     }
 }
 
-fn get_file_type(meta: &Metadata) -> u8 {
-    if meta.is_dir() {
-        return FileType::Dir as u8;
-    }
-
+fn get_file_type(meta: &Metadata) -> Result<u8, FileTypeError> {
     let file_type = meta.file_type();
-    if file_type.is_fifo() {
-        return FileType::FIFO as u8;
-    } else if file_type.is_char_device() {
-        return FileType::Char as u8;
-    } else if file_type.is_block_device() {
-        return FileType::Block as u8;
-    } else if file_type.is_fifo() {
-        return FileType::FIFO as u8;
-    } else if file_type.is_symlink() {
-        return FileType::Sym as u8;
-    } else if file_type.is_file() {
-        return FileType::Normal as u8;
-    }
 
-    FileType::Unknown as u8
+    match (meta.is_dir(), file_type) {
+        (true, _) => Ok(FileType::Dir as u8),
+        (_, ft) if ft.is_fifo() => Ok(FileType::FIFO as u8),
+        (_, ft) if ft.is_char_device() => Ok(FileType::Char as u8),
+        (_, ft) if ft.is_block_device() => Ok(FileType::Block as u8),
+        (_, ft) if ft.is_symlink() => Ok(FileType::Sym as u8),
+        (_, ft) if ft.is_file() => Ok(FileType::Normal as u8),
+        _ => Err(FileTypeError::Unknown),
+    }
 }
 
-fn generate_header(filename: &String) -> Result<TarHeader, TarError> {
+fn generate_header(filename: &String) -> Result<TarHeader, LibraryError> {
     let mut head = TarHeader::default();
     let meta = fs::symlink_metadata(&filename)?;
 
@@ -389,7 +382,7 @@ fn generate_header(filename: &String) -> Result<TarHeader, TarError> {
     head.mod_time[..mtime.len()].copy_from_slice(mtime.as_bytes());
 
     /* Get the file type and conditional metadata */
-    head.link_indicator[0] = get_file_type(&meta);
+    head.link_indicator[0] = get_file_type(&meta)?;
     if head.link_indicator[0] == FileType::Sym as u8 {
         let link = fs::read_link(&filename)?.to_str().unwrap().to_string();
         head.link_name[..link.len()].copy_from_slice(link.as_bytes());
